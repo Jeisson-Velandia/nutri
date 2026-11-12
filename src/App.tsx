@@ -31,7 +31,7 @@ export interface PortionFood {
   per100: { kcal: number; protein_g: number; carbs_g: number; fat_g: number }
   servingG?: number
   servingLabel?: string
-  source?: 'off' | 'label' | 'manual' | 'ai'
+  source?: 'off' | 'label' | 'manual' | 'ai' | 'usda'
 }
 
 export interface ReviewAddition {

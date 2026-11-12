@@ -18,13 +18,16 @@ export interface AiItem {
   grams_max: number
   confidence: number
   portion_confidence: number
-  alternatives: { name: string; per_100g: Per100 }[]
+  /** Nombre estilo USDA en inglés para buscar los valores verificados. */
+  search_name_en: string
+  alternatives: { name: string; search_name_en: string; per_100g?: Per100 }[]
+  /** Valor estimado por la IA: solo se usa si no se encuentra en USDA ni en tus alimentos. */
   per_100g: Per100
 }
 
 export interface AiOption {
   label: string
-  effect: { type: 'none' | 'add_item' | 'replace_item'; name?: string; grams?: number; per_100g?: Per100 }
+  effect: { type: 'none' | 'add_item' | 'replace_item'; name?: string; search_name_en?: string; grams?: number; per_100g?: Per100 }
 }
 
 export interface AiQuestion { id: string; question: string; related_item_id: string | null; options: AiOption[] }
@@ -63,7 +66,8 @@ REGLAS DE IDENTIFICACIÓN
 1. Separa el plato en componentes que una persona pesaría por separado (arroz, pollo, aguacate, ensalada). Un plato mixto inseparable (sancocho, ajiaco, lasaña, arepa rellena) va como UN ítem con kind="dish".
 2. Usa nombres específicos con su preparación: "arroz blanco cocido", "pechuga de pollo a la plancha"; nunca "comida" o "proteína". Vocabulario de Colombia.
 3. No inventes ítems que no se ven. Lo probable pero invisible (aceite de cocción, mantequilla, aderezo, azúcar en bebidas) NO va en items: va en hidden_ingredient_questions.
-4. Si dudas entre opciones parecidas, elige la más probable y pon hasta 3 en alternatives, cada una con sus valores por 100 g.
+4. Si dudas entre opciones parecidas, elige la más probable y pon hasta 3 en alternatives (nombre en español y search_name_en).
+5b. search_name_en: descripción en inglés al estilo de USDA FoodData Central para buscar el alimento ("Rice, white, cooked", "Chicken breast, grilled", "Egg, whole, fried", "Sandwich, ham and cheese"). Corta y genérica, sin marcas.
 
 REGLAS DE PORCIÓN
 5. Estima gramos de la porción comestible visible, tal como está servida (cocida si está cocida). Referencias: plato llano de ~26 cm si no hay otra, cubiertos, manos, vasos o empaques.
@@ -71,11 +75,11 @@ REGLAS DE PORCIÓN
 7. Si el contexto trae porciones habituales del usuario, úsalas para afinar sin ignorar lo que ves.
 
 VALORES NUTRICIONALES
-8. per_100g son los valores por 100 g del alimento tal como se sirve, tomados de referencias estándar (USDA FoodData Central, Tabla de Composición de Alimentos Colombianos del ICBF). No los inventes a ojo: usa el valor de referencia más cercano.
+8. per_100g es tu mejor estimación por 100 g (referencia USDA/ICBF); el sistema la reemplaza por datos verificados cuando los encuentra. Sé breve: sin decimales innecesarios.
 
 CONFIANZA Y PREGUNTAS
 9. confidence (0–1) = seguridad sobre QUÉ es el ítem. portion_confidence (0–1) = seguridad sobre los gramos. 0.9+ solo si casi no hay duda.
-10. Máximo 2 preguntas en hidden_ingredient_questions, solo si la respuesta cambia el total en más de 50 kcal. Cada una con 2–4 opciones cortas. Efectos: "none"; "add_item" (agrega name, grams y per_100g); "replace_item" (reemplaza el ítem relacionado por name y per_100g, conservando sus gramos).
+10. Máximo 2 preguntas en hidden_ingredient_questions, solo si la respuesta cambia el total en más de 50 kcal. Cada una con 2–4 opciones cortas. Efectos: "none"; "add_item" (agrega name, search_name_en, grams y per_100g); "replace_item" (reemplaza el ítem relacionado por name, search_name_en y per_100g, conservando sus gramos).
 11. Si no hay comida, o la foto está muy oscura o borrosa: is_food=false o image_quality="unusable", items vacío y en retake_hint explica qué cambiar.
 
 Todo texto visible (display_name, preguntas, opciones, retake_hint) en español neutro.
@@ -90,16 +94,17 @@ FORMATO
   "items": [{
     "id": "i1",
     "display_name": string,
+    "search_name_en": string,
     "kind": "ingredient" | "dish" | "drink" | "packaged",
     "preparation": "raw" | "boiled" | "grilled" | "fried" | "baked" | "stewed" | "steamed" | "sauteed" | "unknown",
     "grams": number, "grams_min": number, "grams_max": number,
     "confidence": number, "portion_confidence": number,
     "per_100g": ${PER100},
-    "alternatives": [{ "name": string, "per_100g": ${PER100} }]
+    "alternatives": [{ "name": string, "search_name_en": string }]
   }],
   "hidden_ingredient_questions": [{
     "id": "q1", "question": string, "related_item_id": string | null,
-    "options": [{ "label": string, "effect": { "type": "none" | "add_item" | "replace_item", "name"?: string, "grams"?: number, "per_100g"?: ${PER100} } }]
+    "options": [{ "label": string, "effect": { "type": "none" | "add_item" | "replace_item", "name"?: string, "search_name_en"?: string, "grams"?: number, "per_100g"?: ${PER100} } }]
   }],
   "retake_hint": string | null
 }`
@@ -128,19 +133,39 @@ Reglas:
 
 const isOverload = (status: number, msg: string) => status === 503 || status === 500 || /high demand|overloaded|unavailable/i.test(msg)
 
+/** Desactiva (o reduce al mínimo) el "razonamiento" interno: es lo que más demora la respuesta. */
+function fastThinking(model: string) {
+  if (/gemini-2\.5/.test(model)) return { thinkingBudget: 0 }
+  if (/gemini-[3-9]|latest/.test(model)) return { thinkingLevel: 'minimal' }
+  return undefined
+}
+
+const noThinkingSupport = new Set<string>()
+
 async function requestOnce(model: string, apiKey: string, system: string, parts: any[]) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-    }),
-  })
-  let body: any = null
-  try { body = await r.json() } catch {}
-  return { ok: r.ok, status: r.status, body, msg: body?.error?.message ?? `Error ${r.status}` }
+  const send = async (withThinking: boolean) => {
+    const thinkingConfig = withThinking ? fastThinking(model) : undefined
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts }],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json', ...(thinkingConfig ? { thinkingConfig } : {}) },
+      }),
+    })
+    let body: any = null
+    try { body = await r.json() } catch {}
+    return { ok: r.ok, status: r.status, body, msg: body?.error?.message ?? `Error ${r.status}` }
+  }
+  const tryThinking = !noThinkingSupport.has(model) && fastThinking(model) != null
+  let res = await send(tryThinking)
+  // Si el modelo no acepta esa configuración, se repite sin ella (y se recuerda).
+  if (tryThinking && res.status === 400 && /thinking/i.test(res.msg)) {
+    noThinkingSupport.add(model)
+    res = await send(false)
+  }
+  return res
 }
 
 let flashModelsCache: string[] | null = null
@@ -225,11 +250,12 @@ function normalizePlate(j: any): PlateResult {
       grams_max: Math.max(grams, num(it.grams_max, grams * 1.4)),
       confidence: Math.min(1, Math.max(0, num(it.confidence, 0.5))),
       portion_confidence: Math.min(1, Math.max(0, num(it.portion_confidence, 0.5))),
+      search_name_en: String(it.search_name_en ?? it.display_name ?? ''),
       per_100g: per100(it.per_100g),
       alternatives: (Array.isArray(it.alternatives) ? it.alternatives : [])
         .filter((a: any) => a && typeof a === 'object' && a.name)
         .slice(0, 3)
-        .map((a: any) => ({ name: String(a.name), per_100g: per100(a.per_100g) })),
+        .map((a: any) => ({ name: String(a.name), search_name_en: String(a.search_name_en ?? a.name), per_100g: a.per_100g ? per100(a.per_100g) : undefined })),
     }
   })
   return {
@@ -250,6 +276,7 @@ function normalizePlate(j: any): PlateResult {
           effect: {
             type: o.effect?.type ?? 'none',
             name: o.effect?.name,
+            search_name_en: o.effect?.search_name_en,
             grams: o.effect?.grams != null ? num(o.effect.grams) : undefined,
             per_100g: o.effect?.per_100g ? per100(o.effect.per_100g) : undefined,
           },

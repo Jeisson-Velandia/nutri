@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Nav, ReviewAddition } from '../App'
 import { db, macrosFor, MEAL_LABEL, mealForNow, rememberFood, type Meal, type Per100 } from '../lib/db'
 import type { AiItem, PlateResult } from '../lib/gemini'
+import { resolveNutrients, type NutrientSource } from '../lib/nutrients'
 import { ConfidenceDot, Header, Icon } from '../ui'
 
 interface Row {
@@ -16,18 +17,46 @@ interface Row {
   confidence: number
   alternatives: AiItem['alternatives']
   fromQuestion?: string
+  searchEn: string
+  aiPer100: Per100
+  src: NutrientSource
+  srcLabel: string
+  resolving: boolean
 }
 
 const toRow = (it: AiItem): Row => ({
   key: it.id, aiId: it.id, name: it.display_name, grams: Math.round(it.grams), estGrams: Math.round(it.grams),
   min: Math.round(it.grams_min), max: Math.round(it.grams_max), per100: it.per_100g,
   confidence: it.confidence, alternatives: it.alternatives,
+  searchEn: it.search_name_en, aiPer100: it.per_100g, src: 'ai', srcLabel: 'Buscando valores verificados…', resolving: true,
 })
 
 export default function Review({ nav, result, scanId, photo, additions, clearAdditions }: {
   nav: Nav; result: PlateResult; scanId: string; photo?: string; additions: ReviewAddition[]; clearAdditions: () => void
 }) {
   const [rows, setRows] = useState<Row[]>(() => result.items.map(toRow))
+
+  // Cambia los valores estimados por la IA por datos verificados (tus alimentos → USDA).
+  function resolveRow(key: string, name: string, searchEn: string, aiPer100: Per100) {
+    resolveNutrients(name, searchEn, aiPer100).then((res) =>
+      setRows((rs) => rs.map((r) => (r.key === key && r.name === name ? { ...r, per100: res.per100, src: res.source, srcLabel: res.label, resolving: false } : r))),
+    )
+  }
+  useEffect(() => {
+    for (const r of rows) if (r.resolving) resolveRow(r.key, r.name, r.searchEn, r.aiPer100)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function swapTo(r: Row, a: AiItem['alternatives'][number]) {
+    const fallback = a.per_100g ?? r.aiPer100
+    const back = { name: r.name, search_name_en: r.searchEn, per_100g: r.per100 }
+    update(r.key, {
+      name: a.name, searchEn: a.search_name_en, aiPer100: fallback, per100: fallback, confidence: 1, resolving: true,
+      src: 'ai', srcLabel: 'Buscando valores verificados…',
+      alternatives: [back, ...r.alternatives.filter((x) => x.name !== a.name)],
+    })
+    resolveRow(r.key, a.name, a.search_name_en, fallback)
+  }
 
   // Ingredientes agregados desde el buscador.
   useEffect(() => {
@@ -37,6 +66,7 @@ export default function Review({ nav, result, scanId, photo, additions, clearAdd
       ...additions.map((a, i) => ({
         key: `add-${Date.now()}-${i}`, aiId: `user-${i}`, name: a.name, grams: a.grams, estGrams: a.grams,
         min: Math.max(1, Math.round(a.grams / 2)), max: a.grams * 2, per100: a.per100, confidence: 1, alternatives: [],
+        searchEn: a.name, aiPer100: a.per100, src: 'mine' as const, srcLabel: 'Agregado por ti', resolving: false,
       })),
     ])
     clearAdditions()
@@ -60,6 +90,7 @@ export default function Review({ nav, result, scanId, photo, additions, clearAdd
         out.push({
           key: `${q.id}-add`, aiId: q.id, name: eff.name, grams: eff.grams ?? 10, estGrams: eff.grams ?? 10,
           min: 1, max: Math.max(50, (eff.grams ?? 10) * 3), per100: eff.per_100g, confidence: 1, alternatives: [], fromQuestion: q.id,
+          searchEn: eff.search_name_en ?? eff.name, aiPer100: eff.per_100g, src: 'ai', srcLabel: 'Estimado por IA', resolving: false,
         })
       }
       if (eff.type === 'replace_item' && q.related_item_id && eff.name && eff.per_100g) {
@@ -84,7 +115,11 @@ export default function Review({ nav, result, scanId, photo, additions, clearAdd
     setSaving(true)
     const now = Date.now()
     for (const r of finalRows) {
-      const foodId = await rememberFood({ name: r.name, source: 'ai', per100: r.per100, servingG: r.grams })
+      const foodId = await rememberFood({
+        name: r.name, per100: r.per100, servingG: r.grams,
+        source: r.src === 'usda' ? 'usda' : 'ai',
+        sourceName: r.src === 'usda' ? r.srcLabel.replace(/^USDA · /, '') : undefined,
+      })
       await db.entries.add({
         date: nav.date, meal, name: r.name, grams: r.grams, ...macrosFor(r.per100, r.grams),
         source: photo ? 'photo' : 'text', foodId, scanId, createdAt: now,
@@ -147,6 +182,7 @@ export default function Review({ nav, result, scanId, photo, additions, clearAdd
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-muted tabular-nums">
                     <span>{r.grams} g</span><span>·</span><span>P {m.protein_g} · C {m.carbs_g} · G {m.fat_g}</span>
                   </div>
+                  <div className={`mt-0.5 truncate text-[11px] ${r.resolving ? 'animate-pulse text-muted' : r.src === 'ai' ? 'text-carbs' : 'text-accent/80'}`}>{r.srcLabel}</div>
                 </div>
                 <div className="text-right">
                   <div className="font-semibold tabular-nums">{m.kcal}</div>
@@ -158,7 +194,7 @@ export default function Review({ nav, result, scanId, photo, additions, clearAdd
                 <div className="flex flex-wrap gap-2 px-3 pb-3">
                   <span className="self-center text-xs text-muted">¿O es…?</span>
                   {r.alternatives.map((a) => (
-                    <button key={a.name} onClick={() => update(r.key, { name: a.name, per100: a.per_100g, confidence: 1, alternatives: [{ name: r.name, per_100g: r.per100 }] })} className="chip text-xs">{a.name}</button>
+                    <button key={a.name} onClick={() => swapTo(r, a)} className="chip text-xs">{a.name}</button>
                   ))}
                 </div>
               )}
@@ -169,7 +205,7 @@ export default function Review({ nav, result, scanId, photo, additions, clearAdd
                   {r.alternatives.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.alternatives.map((a) => (
-                        <button key={a.name} onClick={() => update(r.key, { name: a.name, per100: a.per_100g, alternatives: [{ name: r.name, per_100g: r.per100 }, ...r.alternatives.filter((x) => x.name !== a.name)] })} className="chip text-xs">Cambiar a {a.name}</button>
+                        <button key={a.name} onClick={() => swapTo(r, a)} className="chip text-xs">Cambiar a {a.name}</button>
                       ))}
                     </div>
                   )}

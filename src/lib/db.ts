@@ -56,7 +56,9 @@ export interface Food extends SyncMeta {
   name: string
   brand?: string
   barcode?: string
-  source: 'off' | 'ai' | 'label' | 'manual'
+  source: 'off' | 'ai' | 'label' | 'manual' | 'usda'
+  /** Descripción original en USDA, para mostrar de dónde salen los valores. */
+  sourceName?: string
   per100: Per100
   servingG?: number
   servingLabel?: string

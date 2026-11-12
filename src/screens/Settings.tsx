@@ -12,6 +12,8 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
   const [key, setKey] = useState('')
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [status, setStatus] = useState<string | null>(null)
+  const [usdaKey, setUsdaKey] = useState('')
+  const [usdaStatus, setUsdaStatus] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const scans = useLiveQuery(() => db.scans.toArray()) ?? []
 
@@ -23,6 +25,7 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
   useEffect(() => {
     getSetting('apiKey', '').then(setKey)
     getSetting('model', DEFAULT_MODEL).then(setModel)
+    getSetting('usdaKey', '').then(setUsdaKey)
   }, [])
 
   async function saveKey() {
@@ -128,6 +131,27 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
           </select>
           <button disabled={!key.trim()} onClick={saveKey} className="btn-primary mt-3 w-full">Guardar y probar</button>
           {status && <p className="mt-2 text-sm text-muted">{status}</p>}
+        </section>
+
+        <section className="rounded-2xl border border-line bg-card p-4">
+          <h2 className="font-semibold">Datos nutricionales (USDA)</h2>
+          <p className="mt-1 text-sm text-muted">
+            Las calorías y macros de fotos y textos salen de USDA FoodData Central, la misma fuente de Fitia para alimentos genéricos.
+            Sin key se usa una de prueba muy limitada; crea la tuya gratis en{' '}
+            <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noreferrer" className="text-accent underline">fdc.nal.usda.gov/api-key-signup</a>.
+          </p>
+          <input type="password" value={usdaKey} onChange={(e) => setUsdaKey(e.target.value)} placeholder="Pega tu key de USDA (api.data.gov)" className="field mt-3" autoComplete="off" />
+          <button
+            disabled={!usdaKey.trim()}
+            onClick={async () => {
+              setUsdaStatus('Probando…')
+              const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=egg&pageSize=1&api_key=${encodeURIComponent(usdaKey.trim())}`).catch(() => null)
+              if (r?.ok) { await setSetting('usdaKey', usdaKey.trim()); setUsdaStatus('Listo: la key de USDA funciona.') }
+              else setUsdaStatus(r ? `No funcionó (error ${r.status}). Revisa la key.` : 'No se pudo conectar con USDA.')
+            }}
+            className="btn-primary mt-3 w-full"
+          >Guardar y probar</button>
+          {usdaStatus && <p className="mt-2 text-sm text-muted">{usdaStatus}</p>}
         </section>
 
         <section className="rounded-2xl border border-line bg-card p-4">
