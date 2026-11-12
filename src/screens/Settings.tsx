@@ -28,10 +28,10 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
   async function saveKey() {
     setStatus('Probando…')
     try {
-      await testKey(key.trim(), model)
+      const r = await testKey(key.trim(), model)
       await setSetting('apiKey', key.trim())
       await setSetting('model', model)
-      setStatus('Listo: la API key funciona.')
+      setStatus(r === 'ok' ? 'Listo: la API key funciona.' : 'Key guardada y válida. El modelo está saturado ahora; la app reintentará sola con otro modelo.')
     } catch (e: any) {
       setStatus(`No funcionó: ${e.message}`)
     }

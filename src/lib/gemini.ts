@@ -126,11 +126,9 @@ Reglas:
 
 // ---------- Llamada a la API ----------
 
-async function callGemini(system: string, parts: any[]): Promise<{ json: any; model: string; latencyMs: number }> {
-  const apiKey = await getSetting<string>('apiKey', '')
-  if (!apiKey) throw new Error('Falta tu API key de Gemini. Agrégala en Ajustes.')
-  const model = await getSetting<string>('model', DEFAULT_MODEL)
-  const t0 = performance.now()
+const isOverload = (status: number, msg: string) => status === 503 || status === 500 || /high demand|overloaded|unavailable/i.test(msg)
+
+async function requestOnce(model: string, apiKey: string, system: string, parts: any[]) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
@@ -140,25 +138,39 @@ async function callGemini(system: string, parts: any[]): Promise<{ json: any; mo
       generationConfig: { temperature: 0, responseMimeType: 'application/json' },
     }),
   })
-  const latencyMs = Math.round(performance.now() - t0)
-  if (!r.ok) {
-    let msg = `Error ${r.status}`
-    try {
-      const e = await r.json()
-      msg = e?.error?.message ?? msg
-    } catch {}
-    if (r.status === 429) msg = 'Llegaste al límite del plan gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo.'
-    if (r.status === 400 && /API key/i.test(msg)) msg = 'La API key no es válida. Revísala en Ajustes.'
-    throw new Error(msg)
+  let body: any = null
+  try { body = await r.json() } catch {}
+  return { ok: r.ok, status: r.status, body, msg: body?.error?.message ?? `Error ${r.status}` }
+}
+
+/** Llama al modelo elegido; si está saturado, reintenta una vez y luego prueba con los otros modelos. */
+async function callGemini(system: string, parts: any[]): Promise<{ json: any; model: string; latencyMs: number }> {
+  const apiKey = await getSetting<string>('apiKey', '')
+  if (!apiKey) throw new Error('Falta tu API key de Gemini. Agrégala en Ajustes.')
+  const preferred = await getSetting<string>('model', DEFAULT_MODEL)
+  const chain = [preferred, preferred, ...MODEL_OPTIONS.map((m) => m.id).filter((m) => m !== preferred)]
+  const t0 = performance.now()
+  let last = { status: 0, msg: '' }
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i]
+    if (i === 1) await new Promise((r) => setTimeout(r, 1200))
+    const res = await requestOnce(model, apiKey, system, parts)
+    if (res.ok) {
+      const text: string = (res.body?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
+      const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+      try {
+        return { json: JSON.parse(clean), model, latencyMs: Math.round(performance.now() - t0) }
+      } catch {
+        throw new Error('La IA devolvió una respuesta que no se pudo leer. Intenta otra vez.')
+      }
+    }
+    last = { status: res.status, msg: res.msg }
+    if (!isOverload(res.status, res.msg) && res.status !== 429) break
   }
-  const data = await r.json()
-  const text: string = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
-  const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
-  try {
-    return { json: JSON.parse(clean), model, latencyMs }
-  } catch {
-    throw new Error('La IA devolvió una respuesta que no se pudo leer. Intenta otra vez.')
-  }
+  if (last.status === 429) throw new Error('Llegaste al límite del plan gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo.')
+  if (isOverload(last.status, last.msg)) throw new Error('Los modelos de Gemini están saturados en este momento. Intenta de nuevo en unos minutos.')
+  if (last.status === 400 && /API key/i.test(last.msg)) throw new Error('La API key no es válida. Revísala en Ajustes.')
+  throw new Error(last.msg)
 }
 
 async function userContext() {
@@ -261,15 +273,16 @@ export async function readLabel(base64: string) {
   return { ...r, per_100g: p100, uncertain_fields: r.uncertain_fields ?? [] } as LabelResult
 }
 
-export async function testKey(apiKey: string, model: string) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }] }),
-  })
+/** Devuelve 'ok' si la key funciona, 'busy' si la key es válida pero el modelo está saturado. */
+export async function testKey(apiKey: string, model: string): Promise<'ok' | 'busy'> {
+  // Listar modelos valida la key sin gastar cuota ni depender de la carga del modelo.
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': apiKey } })
   if (!r.ok) {
     const e = await r.json().catch(() => null)
     throw new Error(e?.error?.message ?? `Error ${r.status}`)
   }
-  return true
+  const res = await requestOnce(model, apiKey, 'Responde solo con {"ok":true}', [{ text: 'ping' }])
+  if (res.ok) return 'ok'
+  if (isOverload(res.status, res.msg) || res.status === 429) return 'busy'
+  throw new Error(res.msg)
 }
