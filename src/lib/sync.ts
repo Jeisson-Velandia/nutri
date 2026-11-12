@@ -172,6 +172,26 @@ async function pullHealthInbox(userId: string) {
       const current = await db.health.get(date)
       const merged: any = { ...(current ?? {}), date, source: 'shortcut' }
       for (const [k, v] of Object.entries(incoming)) if (v != null) merged[k] = v
+
+      // Sueño con dos sumas (en segundos) que Atajos sí calcula bien:
+      //   hoySec  = sueño que empezó hoy desde las 00:00
+      //   ayerSec = sueño que empezó desde ayer a las 00:00 (incluye hoySec)
+      // La parte de anoche antes de medianoche = (ayerSec − hoySec) − lo que ayer ya había empezado
+      // (guardado en la última corrida de ayer). Noche = hoySec + esa parte.
+      const hoy = num(data.sleepTodaySec, 0)
+      const desdeAyer = num(data.sleepSinceYesterdaySec, 0)
+      if (hoy != null || desdeAyer != null) {
+        const h = Math.max(hoy ?? 0, current?.sleepTodaySec ?? 0)
+        const y = Math.max(desdeAyer ?? 0, h)
+        merged.sleepTodaySec = h
+        const [yy, mm, dd] = date.split('-').map(Number)
+        const prevDate = new Date(yy, mm - 1, dd - 1)
+        const prevIso = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`
+        const prevH = (await db.health.get(prevIso))?.sleepTodaySec
+        const antesMedianoche = prevH != null ? Math.min(6 * 3600, Math.max(0, y - h - prevH)) : 0
+        const total = h + antesMedianoche
+        if (total > 0) merged.sleepH = +(total / 3600).toFixed(2)
+      }
       await db.health.put(merged)
       await deleteDoc(d.ref)
     } catch {

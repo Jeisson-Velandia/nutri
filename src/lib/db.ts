@@ -38,6 +38,8 @@ export interface Health extends SyncMeta {
   sleepH?: number
   activeKcal?: number
   weightKg?: number
+  /** Segundos de sueño que empezaron este día (calendario), según la última lectura del Atajo. */
+  sleepTodaySec?: number
   source?: 'shortcut' | 'manual'
 }
 
