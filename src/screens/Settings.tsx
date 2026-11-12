@@ -6,13 +6,14 @@ import { DEFAULT_MODEL, MODEL_OPTIONS, testKey } from '../lib/gemini'
 import { GOALS } from '../lib/nutrition'
 import { Header } from '../ui'
 import { syncEnabled } from '../config'
-import { getSession, getStatus, onStatus, signOutAndClear, syncNow, type SyncStatus } from '../lib/sync'
+import { getSession, getStatus, healthConnectionCode, onStatus, signOutAndClear, syncNow, type SyncStatus } from '../lib/sync'
 
 export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; profile: Profile; onSignedOut: () => void }) {
   const [key, setKey] = useState('')
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [status, setStatus] = useState<string | null>(null)
   const [usdaKey, setUsdaKey] = useState('')
+  const [healthMsg, setHealthMsg] = useState<string | null>(null)
   const [usdaStatus, setUsdaStatus] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const scans = useLiveQuery(() => db.scans.toArray()) ?? []
@@ -116,6 +117,26 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
                 <button onClick={() => { localStorage.removeItem('nutri-local-only'); onSignedOut() }} className="btn-primary mt-3 w-full">Iniciar sesión</button>
               </>
             )}
+          </section>
+        )}
+
+        {syncEnabled && email && (
+          <section className="rounded-2xl border border-line bg-card p-4">
+            <h2 className="font-semibold">Salud de Apple</h2>
+            <p className="mt-1 text-sm text-muted">
+              Un Atajo de iOS lleva tus calorías y macros a Salud, y trae pasos, sueño, calorías activas y peso.
+              Copia este código y pégalo en el Atajo cuando te lo pida. Es privado: permite escribir en tu cuenta.
+            </p>
+            <button
+              onClick={async () => {
+                const code = await healthConnectionCode()
+                if (!code) return setHealthMsg('Inicia sesión primero.')
+                try { await navigator.clipboard.writeText(code); setHealthMsg('Código copiado. Pégalo en el Atajo.') }
+                catch { setHealthMsg(code) }
+              }}
+              className="btn-ghost mt-3 w-full"
+            >Copiar código de conexión</button>
+            {healthMsg && <p className="mt-2 break-all text-sm text-muted">{healthMsg}</p>}
           </section>
         )}
 

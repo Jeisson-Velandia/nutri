@@ -3,7 +3,7 @@ import {
   createUserWithEmailAndPassword, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, type User,
 } from 'firebase/auth'
 import {
-  collection, doc, getDocsFromServer, initializeFirestore, limit, orderBy, query, serverTimestamp, Timestamp, where, writeBatch,
+  collection, deleteDoc, doc, getDocsFromServer, initializeFirestore, limit, orderBy, query, serverTimestamp, Timestamp, where, writeBatch,
 } from 'firebase/firestore'
 import { firebaseConfig, syncEnabled } from '../config'
 import { db, remoteDeletes, setLocalChangeListener, SYNC_TABLES, type SyncTable } from './db'
@@ -117,6 +117,7 @@ export function syncNow(): Promise<void> {
       setStatus({ state: 'syncing', error: undefined })
       await push(userId)
       await pull(userId)
+      await pullHealthInbox(userId)
       const now = Date.now()
       localStorage.setItem('nutri-last-sync', String(now))
       setStatus({ state: 'idle', lastSync: now })
@@ -142,6 +143,50 @@ export function startAutoSync() {
 }
 
 // ---------- Cuenta ----------
+
+// ---------- Salud de Apple (vía Atajos de iOS) ----------
+
+/**
+ * El Atajo escribe en users/{uid}/inbox/{fecha} un campo "data" con un JSON de texto:
+ * { "date": "2026-11-12", "steps": 8123, "sleepH": 7.2, "activeKcal": 610, "weightKg": 79.4 }.
+ * Aquí se pasa a la tabla health y se borra del buzón.
+ */
+async function pullHealthInbox(userId: string) {
+  const snap = await getDocsFromServer(collection(fs!, 'users', userId, 'inbox'))
+  for (const d of snap.docs) {
+    try {
+      const raw = d.data()
+      const data = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw
+      const date = String(data.date ?? d.id).slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { await deleteDoc(d.ref); continue }
+      const num = (v: unknown, decimals: number) => {
+        const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.'))
+        return isFinite(n) && n > 0 ? +n.toFixed(decimals) : undefined
+      }
+      const incoming = {
+        steps: num(data.steps, 0),
+        sleepH: num(data.sleepH, 2),
+        activeKcal: num(data.activeKcal, 0),
+        weightKg: num(data.weightKg, 1),
+      }
+      const current = await db.health.get(date)
+      const merged: any = { ...(current ?? {}), date, source: 'shortcut' }
+      for (const [k, v] of Object.entries(incoming)) if (v != null) merged[k] = v
+      await db.health.put(merged)
+      await deleteDoc(d.ref)
+    } catch {
+      // Un registro mal formado no debe frenar la sincronización.
+    }
+  }
+}
+
+/** Código que se pega una vez en el Atajo: permite escribir en tu buzón sin guardar tu contraseña. */
+export async function healthConnectionCode(): Promise<string | null> {
+  await authReady
+  const u = auth?.currentUser
+  if (!u) return null
+  return JSON.stringify({ k: firebaseConfig.apiKey, p: firebaseConfig.projectId, u: u.uid, r: u.refreshToken })
+}
 
 export async function getSession(): Promise<{ user: { email: string | null; uid: string } } | null> {
   const u = await authReady

@@ -7,6 +7,11 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Buzón donde el Atajo de iOS deja los datos de Salud (pasos, sueño, peso).
+    match /users/{userId}/inbox/{day} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }
