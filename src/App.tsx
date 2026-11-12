@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, todayISO, type Meal } from './lib/db'
+import { db, migrateFromV1, todayISO, type Meal } from './lib/db'
+import { syncEnabled } from './config'
+import { getSession, startAutoSync, syncNow } from './lib/sync'
+import Login from './screens/Login'
 import type { PlateResult } from './lib/gemini'
 import type { OffProduct } from './lib/off'
 import Onboarding from './screens/Onboarding'
@@ -10,12 +13,12 @@ import Review from './screens/Review'
 import AddFood from './screens/AddFood'
 import Portion from './screens/Portion'
 import Settings from './screens/Settings'
-import { Icon } from './ui'
+import { Icon, Spinner } from './ui'
 
 export type View =
   | { name: 'today' }
   | { name: 'scan'; mode: ScanMode; barcode?: string }
-  | { name: 'review'; result: PlateResult; scanId: number; photo?: string }
+  | { name: 'review'; result: PlateResult; scanId: string; photo?: string }
   | { name: 'add' }
   | { name: 'portion'; product: OffProduct | PortionFood }
   | { name: 'settings' }
@@ -50,7 +53,40 @@ export interface Nav {
   setMeal: (m: Meal | null) => void
 }
 
+type Boot = 'loading' | 'login' | 'syncing' | 'ready'
+
 export default function App() {
+  const [boot, setBoot] = useState<Boot>('loading')
+
+  useEffect(() => {
+    (async () => {
+      await migrateFromV1().catch(() => {})
+      if (!syncEnabled) return setBoot('ready')
+      startAutoSync()
+      const session = await getSession()
+      if (!session) return setBoot(localStorage.getItem('nutri-local-only') ? 'ready' : 'login')
+      await afterLogin()
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // En un dispositivo nuevo, espera la primera descarga antes de mostrar nada (si no, pediría el perfil otra vez).
+  async function afterLogin() {
+    localStorage.removeItem('nutri-local-only')
+    const hasProfile = await db.profile.get('me')
+    if (hasProfile) { setBoot('ready'); syncNow(); return }
+    setBoot('syncing')
+    await syncNow()
+    setBoot('ready')
+  }
+
+  if (boot === 'loading') return null
+  if (boot === 'login') return <Login onDone={afterLogin} onSkip={() => { localStorage.setItem('nutri-local-only', '1'); setBoot('ready') }} />
+  if (boot === 'syncing') return <div className="grid h-full place-items-center"><Spinner label="Trayendo tus datos…" /></div>
+  return <Main onSignedOut={() => setBoot('login')} />
+}
+
+function Main({ onSignedOut }: { onSignedOut: () => void }) {
   const profile = useLiveQuery(() => db.profile.get('me'), [], 'loading' as const)
   const [stack, setStack] = useState<View[]>([{ name: 'today' }])
   const [date, setDate] = useState(todayISO())
@@ -97,7 +133,7 @@ export default function App() {
           {v.name === 'review' && <Review nav={nav} {...v} additions={additions} clearAdditions={() => setAdditions([])} />}
           {v.name === 'add' && <AddFood nav={nav} />}
           {v.name === 'portion' && <Portion nav={nav} product={v.product} />}
-          {v.name === 'settings' && <Settings nav={nav} profile={profile} />}
+          {v.name === 'settings' && <Settings nav={nav} profile={profile} onSignedOut={onSignedOut} />}
         </main>
       ))}
 

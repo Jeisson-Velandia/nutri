@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { Nav } from '../App'
-import { db, MEAL_LABEL, shiftDate, todayISO, type Entry, type Meal, type Profile } from '../lib/db'
+import { db, MEAL_LABEL, shiftDate, todayISO, type Entry, type Health, type Meal, type Profile } from '../lib/db'
+import { targetsForDay } from '../lib/nutrition'
 import { Icon, MacroBar, Ring } from '../ui'
 
 const MEALS: Meal[] = ['breakfast', 'lunch', 'dinner', 'snack']
@@ -18,15 +19,30 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
   const { date, setDate } = nav
   const entries = useLiveQuery(() => db.entries.where('date').equals(date).sortBy('createdAt'), [date]) ?? []
   const water = useLiveQuery(() => db.water.where('date').equals(date).toArray(), [date]) ?? []
+  const health = useLiveQuery(() => db.health.get(date), [date])
+  const daily = useLiveQuery(() => db.daily.get(date), [date])
   const [editing, setEditing] = useState<Entry | null>(null)
+  const [editHealth, setEditHealth] = useState(false)
 
-  const t = profile.targets
+  const [y, mo, d] = date.split('-').map(Number)
+  const weekday = new Date(y, mo - 1, d).getDay()
+  const training = daily?.training ?? (profile.trainingDays ?? []).includes(weekday)
+  const t = { ...profile.targets, ...targetsForDay(profile.targets, training) }
   const sum = entries.reduce(
     (a, e) => ({ kcal: a.kcal + e.kcal, p: a.p + e.protein_g, c: a.c + e.carbs_g, f: a.f + e.fat_g }),
     { kcal: 0, p: 0, c: 0, f: 0 },
   )
   const waterMl = water.reduce((a, w) => a + w.ml, 0)
   const remaining = t.kcal - sum.kcal
+
+  // Publica el resumen del día (lo lee el Atajo para registrarlo en Salud). Solo escribe si cambió.
+  useEffect(() => {
+    if (daily === undefined && entries.length === 0 && waterMl === 0) return
+    const next = { kcal: Math.round(sum.kcal), protein_g: Math.round(sum.p), carbs_g: Math.round(sum.c), fat_g: Math.round(sum.f), water_ml: waterMl }
+    const same = daily && (Object.keys(next) as (keyof typeof next)[]).every((k) => daily[k] === next[k])
+    if (!same) db.daily.put({ ...(daily ?? {}), date, ...next })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, sum.kcal, sum.p, sum.c, sum.f, waterMl])
 
   return (
     <div className="pb-6">
@@ -49,13 +65,29 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
         </Ring>
       </div>
 
+      <div className="mt-3 flex justify-center">
+        <button
+          onClick={() => db.daily.put({ ...(daily ?? { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, water_ml: 0 }), date, training: !training })}
+          className={training ? 'chip-on text-xs' : 'chip text-xs text-muted'}
+        >{training ? 'Día de entreno' : 'Día de descanso'} · toca para cambiar</button>
+      </div>
+
       <div className="mx-5 mt-5 flex gap-4">
         <MacroBar label="Proteína" value={sum.p} max={t.protein_g} color="var(--color-protein)" />
         <MacroBar label="Carbos" value={sum.c} max={t.carbs_g} color="var(--color-carbs)" />
         <MacroBar label="Grasa" value={sum.f} max={t.fat_g} color="var(--color-fat)" />
       </div>
 
-      <div className="mx-5 mt-5 rounded-2xl border border-line bg-card p-4">
+      <button onClick={() => setEditHealth(true)} className="mx-5 mt-5 grid w-[calc(100%-2.5rem)] grid-cols-3 gap-2 text-left">
+        <HealthStat label="Pasos" value={health?.steps != null ? health.steps.toLocaleString('es-CO') : '—'} goal={t.steps ? `/ ${(t.steps / 1000).toFixed(t.steps % 1000 ? 1 : 0)}k` : ''} pct={health?.steps != null && t.steps ? health.steps / t.steps : 0} color="var(--color-accent)" />
+        <HealthStat label="Sueño" value={health?.sleepH != null ? `${Math.floor(health.sleepH)}h ${String(Math.round((health.sleepH % 1) * 60)).padStart(2, '0')}` : '—'} goal={t.sleepH ? `/ ${t.sleepH} h` : ''} pct={health?.sleepH != null && t.sleepH ? health.sleepH / t.sleepH : 0} color="var(--color-protein)" />
+        <HealthStat label="Peso" value={health?.weightKg != null ? `${health.weightKg} kg` : '—'} goal="" pct={0} color="var(--color-carbs)" />
+      </button>
+      {health?.sleepH != null && t.sleepH && health.sleepH < t.sleepH - 1 && (
+        <p className="mx-5 mt-2 rounded-xl bg-carbs/10 px-3 py-2 text-xs text-carbs">Dormiste poco: es normal tener más hambre hoy. Prioriza proteína y verduras para llenarte sin pasarte.</p>
+      )}
+
+      <div className="mx-5 mt-3 rounded-2xl border border-line bg-card p-4">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm text-muted">Agua</div>
@@ -114,6 +146,7 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
       </div>
 
       {editing && <EditEntry entry={editing} onClose={() => setEditing(null)} />}
+      {editHealth && <EditHealth date={date} health={health} onClose={() => setEditHealth(false)} />}
     </div>
   )
 }
@@ -150,6 +183,46 @@ function EditEntry({ entry, onClose }: { entry: Entry; onClose: () => void }) {
           <button onClick={async () => { await db.entries.delete(entry.id!); onClose() }} className="btn-ghost text-fat">{Icon.trash}</button>
           <button onClick={async () => { await db.entries.update(entry.id!, { grams, meal, ...scaled }); onClose() }} className="btn-primary flex-1">Guardar</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function HealthStat({ label, value, goal, pct, color }: { label: string; value: string; goal: string; pct: number; color: string }) {
+  return (
+    <div className="rounded-2xl border border-line bg-card p-3">
+      <div className="text-xs text-muted">{label}</div>
+      <div className="mt-0.5 truncate text-base font-semibold tabular-nums">{value}<span className="ml-1 text-[11px] font-normal text-muted">{goal}</span></div>
+      <div className="mt-2 h-1 rounded-full bg-line overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct * 100)}%`, background: color }} />
+      </div>
+    </div>
+  )
+}
+
+function EditHealth({ date, health, onClose }: { date: string; health?: Health; onClose: () => void }) {
+  const [steps, setSteps] = useState<string>(health?.steps?.toString() ?? '')
+  const [sleep, setSleep] = useState<string>(health?.sleepH?.toString() ?? '')
+  const [weight, setWeight] = useState<string>(health?.weightKg?.toString() ?? '')
+  const num = (v: string) => (v.trim() === '' ? undefined : +v.replace(',', '.'))
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={onClose}>
+      <div className="pb-safe mx-auto w-full max-w-md rounded-t-3xl border-t border-line bg-card p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line" />
+        <h3 className="text-lg font-semibold">Datos del día</h3>
+        <p className="text-sm text-muted">Llegan solos desde Salud con el Atajo; aquí puedes corregirlos.</p>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <label className="text-xs text-muted">Pasos<input type="number" inputMode="numeric" value={steps} onChange={(e) => setSteps(e.target.value)} className="field mt-1" /></label>
+          <label className="text-xs text-muted">Sueño (h)<input type="number" inputMode="decimal" step={0.25} value={sleep} onChange={(e) => setSleep(e.target.value)} className="field mt-1" /></label>
+          <label className="text-xs text-muted">Peso (kg)<input type="number" inputMode="decimal" step={0.1} value={weight} onChange={(e) => setWeight(e.target.value)} className="field mt-1" /></label>
+        </div>
+        <button
+          onClick={async () => {
+            await db.health.put({ ...(health ?? {}), date, steps: num(steps), sleepH: num(sleep), weightKg: num(weight), source: 'manual' })
+            onClose()
+          }}
+          className="btn-primary mt-5 w-full"
+        >Guardar</button>
       </div>
     </div>
   )

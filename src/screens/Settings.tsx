@@ -3,15 +3,22 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { Nav } from '../App'
 import { db, exportAll, getSetting, importAll, setSetting, type Profile } from '../lib/db'
 import { DEFAULT_MODEL, MODEL_OPTIONS, testKey } from '../lib/gemini'
-import { GOAL } from '../lib/nutrition'
+import { GOALS } from '../lib/nutrition'
 import { Header } from '../ui'
+import { syncEnabled } from '../config'
+import { getSession, getStatus, onStatus, signOutAndClear, syncNow, type SyncStatus } from '../lib/sync'
 
-export default function Settings({ nav, profile }: { nav: Nav; profile: Profile }) {
+export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; profile: Profile; onSignedOut: () => void }) {
   const [key, setKey] = useState('')
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [status, setStatus] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const scans = useLiveQuery(() => db.scans.toArray()) ?? []
+
+  const [email, setEmail] = useState<string | null>(null)
+  const [sync, setSync] = useState<SyncStatus>(getStatus())
+  useEffect(() => onStatus(setSync), [])
+  useEffect(() => { getSession().then((s) => setEmail(s?.user.email ?? null)) }, [])
 
   useEffect(() => {
     getSetting('apiKey', '').then(setKey)
@@ -48,7 +55,7 @@ export default function Settings({ nav, profile }: { nav: Nav; profile: Profile 
     const f = e.target.files?.[0]
     e.target.value = ''
     if (!f) return
-    if (!confirm('Esto reemplaza todos tus datos actuales por los del respaldo. ¿Continuar?')) return
+    if (!confirm('Esto agrega los datos del respaldo a los que ya tienes (los repetidos se sobrescriben). ¿Continuar?')) return
     try {
       await importAll(JSON.parse(await f.text()))
       setStatus('Respaldo restaurado.')
@@ -70,18 +77,50 @@ export default function Settings({ nav, profile }: { nav: Nav; profile: Profile 
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-semibold">Perfil y metas</h2>
-              <p className="text-sm text-muted">{GOAL[profile.goal]} · {profile.targets.kcal} kcal · {profile.weightKg} kg</p>
+              <p className="text-sm text-muted">{GOALS[profile.goal]?.label} · {profile.targets.kcal} kcal · {profile.weightKg} kg</p>
             </div>
             <button onClick={() => nav.go({ name: 'profile' })} className="chip">Editar</button>
           </div>
         </section>
+
+        {syncEnabled && (
+          <section className="rounded-2xl border border-line bg-card p-4">
+            <h2 className="font-semibold">Cuenta y sincronización</h2>
+            {email ? (
+              <>
+                <p className="mt-1 text-sm text-muted">{email}</p>
+                <p className="mt-1 text-sm">
+                  {sync.state === 'syncing' ? 'Sincronizando…'
+                    : sync.state === 'error' ? <span className="text-fat">Error: {sync.error}</span>
+                    : sync.state === 'offline' ? 'Sin conexión: se sincroniza al volver la señal.'
+                    : sync.lastSync ? `Sincronizado ${new Date(sync.lastSync).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}` : 'Pendiente'}
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button onClick={() => syncNow()} className="btn-ghost flex-1">Sincronizar ahora</button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Se cerrará la sesión y se borrarán los datos de este dispositivo. Tus datos quedan guardados en tu cuenta. ¿Continuar?')) return
+                      await signOutAndClear(); onSignedOut()
+                    }}
+                    className="btn-ghost text-fat"
+                  >Salir</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-sm text-muted">Estás usando la app sin cuenta: tus datos solo viven en este dispositivo.</p>
+                <button onClick={() => { localStorage.removeItem('nutri-local-only'); onSignedOut() }} className="btn-primary mt-3 w-full">Iniciar sesión</button>
+              </>
+            )}
+          </section>
+        )}
 
         <section className="rounded-2xl border border-line bg-card p-4">
           <h2 className="font-semibold">IA (Google Gemini)</h2>
           <p className="mt-1 text-sm text-muted">
             Crea una API key gratis en{' '}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-accent underline">aistudio.google.com/apikey</a>.
-            Se guarda solo en este teléfono.
+            {syncEnabled && email ? 'Se guarda en tu cuenta privada y queda disponible en tus otros dispositivos.' : 'Se guarda solo en este dispositivo.'}
           </p>
           <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Pega tu API key" className="field mt-3" autoComplete="off" />
           <select value={model} onChange={(e) => setModel(e.target.value)} className="field mt-2">
@@ -93,7 +132,7 @@ export default function Settings({ nav, profile }: { nav: Nav; profile: Profile 
 
         <section className="rounded-2xl border border-line bg-card p-4">
           <h2 className="font-semibold">Tus datos</h2>
-          <p className="mt-1 text-sm text-muted">Todo vive en este teléfono. Haz un respaldo de vez en cuando (por ejemplo, a Google Drive o Archivos).</p>
+          <p className="mt-1 text-sm text-muted">Exporta un respaldo en JSON cuando quieras (por ejemplo, a Google Drive o Archivos).</p>
           <div className="mt-3 flex gap-2">
             <button onClick={doExport} className="btn-ghost flex-1">Exportar</button>
             <button onClick={() => fileRef.current?.click()} className="btn-ghost flex-1">Importar</button>

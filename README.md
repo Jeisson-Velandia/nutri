@@ -28,6 +28,13 @@ Nota: en desarrollo por la red local (http) la cámara de video no arranca en iO
 2. Settings → Pages → Source: **GitHub Actions**.
 3. Cada push a `main` publica en `https://<usuario>.github.io/<repo>/`.
 
+## Cuenta y sincronización (Firebase)
+
+Mismo método que FP: Firebase Authentication (correo y contraseña) + Firestore. La app guarda todo local (IndexedDB) y sincroniza con `users/{uid}/records` cuando hay sesión.
+
+1. Pega el `firebaseConfig` del proyecto en `src/config.ts`.
+2. Publica las reglas de `firestore.rules` (Firestore → Reglas).
+
 ## API key
 
 Crea una key gratis en https://aistudio.google.com/apikey y pégala en **Ajustes** dentro de la app. Nunca la pongas en el código: el repositorio es público.

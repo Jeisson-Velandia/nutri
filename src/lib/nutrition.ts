@@ -8,10 +8,32 @@ export const ACTIVITY: Record<Activity, { label: string; hint: string; factor: n
   very_active: { label: 'Muy activo', hint: 'Doble sesión o trabajo físico + entrenamiento', factor: 1.9 },
 }
 
-export const GOAL: Record<Goal, string> = {
-  lose: 'Bajar grasa',
-  maintain: 'Mantener',
-  gain: 'Ganar masa',
+/**
+ * Modos de objetivo. rate = % del peso corporal por semana (negativo = bajar).
+ * Proteína en g/kg; pasos diarios sugeridos.
+ */
+export const GOALS: Record<Goal, {
+  label: string; hint: string
+  rate: { min: number; max: number; def: number } | null
+  kcalAdj?: number // ajuste fijo sobre el TDEE (recomposición)
+  proteinPerKg: number; fatPct: number; steps: number
+}> = {
+  cut: {
+    label: 'Definición', hint: 'Bajar grasa conservando músculo',
+    rate: { min: -1, max: -0.25, def: -0.5 }, proteinPerKg: 2.2, fatPct: 0.25, steps: 10000,
+  },
+  recomp: {
+    label: 'Recomposición', hint: 'Peso estable: menos grasa, más músculo',
+    rate: null, kcalAdj: -0.1, proteinPerKg: 2.2, fatPct: 0.25, steps: 9000,
+  },
+  maintain: {
+    label: 'Mantenimiento', hint: 'Sostener peso y rendimiento',
+    rate: null, proteinPerKg: 1.8, fatPct: 0.28, steps: 8000,
+  },
+  bulk: {
+    label: 'Volumen', hint: 'Ganar músculo con superávit controlado',
+    rate: { min: 0.1, max: 0.5, def: 0.25 }, proteinPerKg: 1.8, fatPct: 0.25, steps: 7000,
+  },
 }
 
 export interface BodyInput {
@@ -21,23 +43,49 @@ export interface BodyInput {
   weightKg: number
   activity: Activity
   goal: Goal
-  rateKgWeek: number
+  ratePctWeek: number
+  trainingDays: number[] // 0 = domingo
+  carbCycling: boolean
+  stepsTarget: number
+  sleepTarget: number
 }
 
-/** Mifflin-St Jeor → TDEE → ajuste por objetivo (7.700 kcal ≈ 1 kg). */
+/** Mifflin-St Jeor → TDEE → ajuste por objetivo (7.700 kcal ≈ 1 kg) → macros y ciclado de carbohidratos. */
 export function computeTargets(b: BodyInput): Targets {
+  const g = GOALS[b.goal]
   const bmr = 10 * b.weightKg + 6.25 * b.heightCm - 5 * b.age + (b.sex === 'male' ? 5 : -161)
   const tdee = bmr * ACTIVITY[b.activity].factor
-  const rate = b.goal === 'maintain' ? 0 : b.goal === 'lose' ? -Math.abs(b.rateKgWeek) : Math.abs(b.rateKgWeek)
-  const floor = b.sex === 'male' ? 1500 : 1200
-  const kcal = Math.max(floor, Math.round((tdee + (rate * 7700) / 7) / 10) * 10)
+  const kgWeek = g.rate ? (b.ratePctWeek / 100) * b.weightKg : 0
+  const adj = g.rate ? (kgWeek * 7700) / 7 : (g.kcalAdj ?? 0) * tdee
+  const floor = Math.max(b.sex === 'male' ? 1500 : 1200, Math.round(bmr))
+  const kcal = Math.max(floor, Math.round((tdee + adj) / 10) * 10)
 
-  // Proteína alta en déficit, moderada en volumen; grasa ~25 %; el resto carbohidratos.
-  const proteinPerKg = b.goal === 'lose' ? 2.0 : 1.8
-  const protein_g = Math.round(b.weightKg * proteinPerKg)
-  const fat_g = Math.round((kcal * 0.25) / 9)
+  const protein_g = Math.round(b.weightKg * g.proteinPerKg)
+  const fat_g = Math.max(Math.round(b.weightKg * 0.6), Math.round((kcal * g.fatPct) / 9))
   const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4))
   const water_ml = Math.round((b.weightKg * 35) / 250) * 250
 
-  return { kcal, protein_g, carbs_g, fat_g, water_ml, bmr: Math.round(bmr), tdee: Math.round(tdee) }
+  // Ciclado: más carbohidratos los días de entreno, menos en descanso, mismo promedio semanal.
+  const nT = b.trainingDays.length
+  const nR = 7 - nT
+  let carbsTrain = carbs_g
+  let carbsRest = carbs_g
+  if (b.carbCycling && nT > 0 && nR > 0) {
+    const delta = Math.round(carbs_g * 0.2)
+    carbsTrain = carbs_g + delta
+    carbsRest = Math.max(0, Math.round(carbs_g - (delta * nT) / nR))
+  }
+
+  return {
+    kcal, protein_g, carbs_g, fat_g, water_ml, bmr: Math.round(bmr), tdee: Math.round(tdee),
+    kcalTrain: kcal + (carbsTrain - carbs_g) * 4, carbsTrain,
+    kcalRest: kcal + (carbsRest - carbs_g) * 4, carbsRest,
+    steps: b.stepsTarget, sleepH: b.sleepTarget, kgWeek: +kgWeek.toFixed(2),
+  }
+}
+
+/** Metas del día según si es de entreno o descanso. */
+export function targetsForDay(t: Targets, training: boolean) {
+  if (t.kcalTrain == null) return { kcal: t.kcal, carbs_g: t.carbs_g }
+  return training ? { kcal: t.kcalTrain, carbs_g: t.carbsTrain! } : { kcal: t.kcalRest!, carbs_g: t.carbsRest! }
 }

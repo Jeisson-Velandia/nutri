@@ -25,7 +25,7 @@ const toRow = (it: AiItem): Row => ({
 })
 
 export default function Review({ nav, result, scanId, photo, additions, clearAdditions }: {
-  nav: Nav; result: PlateResult; scanId: number; photo?: string; additions: ReviewAddition[]; clearAdditions: () => void
+  nav: Nav; result: PlateResult; scanId: string; photo?: string; additions: ReviewAddition[]; clearAdditions: () => void
 }) {
   const [rows, setRows] = useState<Row[]>(() => result.items.map(toRow))
 
