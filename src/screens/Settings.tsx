@@ -70,6 +70,7 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
   // Precisión: cuánto corrige el usuario los gramos que estima la IA.
   const diffs = scans.flatMap((s) => s.diff ?? []).filter((d) => d.finalG != null && d.estG > 0)
   const mape = diffs.length ? Math.round((diffs.reduce((a, d) => a + Math.abs(d.finalG! - d.estG) / d.estG, 0) / diffs.length) * 100) : null
+  const lastScan = [...scans].sort((a, b) => b.createdAt - a.createdAt)[0]
   const avgLatency = scans.length ? (scans.reduce((a, s) => a + s.latencyMs, 0) / scans.length / 1000).toFixed(1) : null
 
   return (
@@ -168,6 +169,7 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
           <h2 className="font-semibold">Precisión de la IA</h2>
           <p className="mt-1 text-muted tabular-nums">
             {scans.length} análisis · {avgLatency ? `${avgLatency} s promedio` : 'sin datos aún'}
+            {lastScan && ` · último: ${(lastScan.latencyMs / 1000).toFixed(1)} s con ${lastScan.model}`}
             {mape != null && ` · corriges los gramos en ${mape} % en promedio`}
           </p>
         </section>

@@ -4,7 +4,7 @@ import type { Nav } from '../App'
 import { analyzePlate, analyzeText, readLabel, type LabelResult } from '../lib/gemini'
 import { resizeToBase64 } from '../lib/image'
 import { lookupBarcode } from '../lib/off'
-import { ErrorBox, Header, Icon, Spinner } from '../ui'
+import { AiSpinner, ErrorBox, Header, Icon, Spinner } from '../ui'
 
 export type ScanMode = 'plate' | 'barcode' | 'label' | 'text'
 
@@ -98,7 +98,7 @@ function PlateMode({ nav }: { nav: Nav }) {
       )}
       {busy ? (
         <>
-          <Spinner label="Detectando ingredientes…" />
+          <AiSpinner label="Detectando ingredientes…" />
           {slow && <button onClick={() => nav.go({ name: 'add' })} className="btn-ghost w-full">Está tardando, buscar manualmente</button>}
         </>
       ) : (
@@ -210,7 +210,7 @@ function LabelMode({ nav, barcode }: { nav: Nav; barcode?: string }) {
         <p className="font-medium text-white">Foto a la tabla nutricional</p>
         <p className="mt-1 text-sm">Que se lean bien los números, sin reflejos.{barcode ? ` Se guardará con el código ${barcode}.` : ''}</p>
       </div>
-      {busy ? <Spinner label="Leyendo la etiqueta…" /> : (
+      {busy ? <AiSpinner label="Leyendo la etiqueta…" /> : (
         <>
           {error && <ErrorBox message={error} />}
           <PhotoButtons onFile={run} />
@@ -304,7 +304,7 @@ function TextMode({ nav }: { nav: Nav }) {
         className="field resize-none"
       />
       {error && <ErrorBox message={error} />}
-      {busy ? <Spinner label="Calculando…" /> : <button disabled={!text.trim()} onClick={run} className="btn-primary w-full">Calcular</button>}
+      {busy ? <AiSpinner label="Calculando…" /> : <button disabled={!text.trim()} onClick={run} className="btn-primary w-full">Calcular</button>}
     </div>
   )
 }

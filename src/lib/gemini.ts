@@ -131,7 +131,22 @@ Reglas:
 
 // ---------- Llamada a la API ----------
 
-const isOverload = (status: number, msg: string) => status === 503 || status === 500 || /high demand|overloaded|unavailable/i.test(msg)
+const isOverload = (status: number, msg: string) => status === 503 || status === 500 || status === 504 || /high demand|overloaded|unavailable|timeout/i.test(msg)
+
+// ---------- Progreso visible en la UI ----------
+export interface AiProgress { model: string; attempt: number; startedAt: number }
+const progressListeners = new Set<(p: AiProgress | null) => void>()
+export const onAiProgress = (fn: (p: AiProgress | null) => void) => { progressListeners.add(fn); return () => { progressListeners.delete(fn) } }
+const emit = (p: AiProgress | null) => progressListeners.forEach((l) => l(p))
+
+const GOOD_MODEL = 'nutri-good-model'
+function lastGoodModel(): string | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(GOOD_MODEL) ?? 'null')
+    return v && Date.now() - v.at < 6 * 3600_000 ? v.model : null // se olvida a las 6 h
+  } catch { return null }
+}
+const rememberGood = (model: string) => { try { localStorage.setItem(GOOD_MODEL, JSON.stringify({ model, at: Date.now() })) } catch {} }
 
 /** Desactiva (o reduce al mínimo) el "razonamiento" interno: es lo que más demora la respuesta. */
 function fastThinking(model: string) {
@@ -142,10 +157,15 @@ function fastThinking(model: string) {
 
 const noThinkingSupport = new Set<string>()
 
-async function requestOnce(model: string, apiKey: string, system: string, parts: any[]) {
+async function requestOnce(model: string, apiKey: string, system: string, parts: any[], timeoutMs = 60000) {
   const send = async (withThinking: boolean) => {
     const thinkingConfig = withThinking ? fastThinking(model) : undefined
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    let r: Response
+    try {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      signal: ctrl.signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
@@ -154,6 +174,12 @@ async function requestOnce(model: string, apiKey: string, system: string, parts:
         generationConfig: { temperature: 0, responseMimeType: 'application/json', ...(thinkingConfig ? { thinkingConfig } : {}) },
       }),
     })
+    } catch (e: any) {
+      clearTimeout(timer)
+      const msg = e?.name === 'AbortError' ? 'timeout' : 'network'
+      return { ok: false, status: msg === 'timeout' ? 504 : 0, body: null, msg }
+    }
+    clearTimeout(timer)
     let body: any = null
     try { body = await r.json() } catch {}
     return { ok: r.ok, status: r.status, body, msg: body?.error?.message ?? `Error ${r.status}` }
@@ -189,38 +215,46 @@ async function availableFlashModels(apiKey: string): Promise<string[]> {
 }
 
 /** Llama al modelo elegido; si está saturado, reintenta una vez y luego prueba con otros modelos Flash. */
-async function callGemini(system: string, parts: any[]): Promise<{ json: any; model: string; latencyMs: number }> {
+async function callGemini(system: string, parts: any[], hasImage = false): Promise<{ json: any; model: string; latencyMs: number }> {
   const apiKey = await getSetting<string>('apiKey', '')
   if (!apiKey) throw new Error('Falta tu API key de Gemini. Agrégala en Ajustes.')
   const preferred = await getSetting<string>('model', DEFAULT_MODEL)
-  const chain = [preferred, preferred, ...MODEL_OPTIONS.map((m) => m.id).filter((m) => m !== preferred)]
+  // Empieza por el último modelo que respondió bien; sin esperas entre intentos.
+  const chain = [...new Set([lastGoodModel(), preferred, ...MODEL_OPTIONS.map((m) => m.id)].filter(Boolean) as string[])]
+  const timeoutMs = hasImage ? 20000 : 12000
   const t0 = performance.now()
   let last = { status: 0, msg: '' }
   let extended = false
-  for (let i = 0; i < chain.length && i < 7; i++) {
-    const model = chain[i]
-    if (i === 1) await new Promise((r) => setTimeout(r, 1200))
-    const res = await requestOnce(model, apiKey, system, parts)
-    if (res.ok) {
-      const text: string = (res.body?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
-      const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
-      try {
-        return { json: JSON.parse(clean), model, latencyMs: Math.round(performance.now() - t0) }
-      } catch {
-        throw new Error('La IA devolvió una respuesta que no se pudo leer. Intenta otra vez.')
+  try {
+    for (let i = 0; i < chain.length && i < 6; i++) {
+      const model = chain[i]
+      emit({ model, attempt: i + 1, startedAt: t0 })
+      const res = await requestOnce(model, apiKey, system, parts, timeoutMs)
+      if (res.ok) {
+        const text: string = (res.body?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
+        const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+        try {
+          const json = JSON.parse(clean)
+          rememberGood(model)
+          return { json, model, latencyMs: Math.round(performance.now() - t0) }
+        } catch {
+          throw new Error('La IA devolvió una respuesta que no se pudo leer. Intenta otra vez.')
+        }
+      }
+      last = { status: res.status, msg: res.msg }
+      if (res.status === 0) throw new Error('Sin conexión a internet.')
+      const retryable = isOverload(res.status, res.msg) || res.status === 429 || res.status === 404
+      if (!retryable) break
+      if (i === chain.length - 1 && !extended) {
+        extended = true
+        for (const m of await availableFlashModels(apiKey)) if (!chain.includes(m)) chain.push(m)
       }
     }
-    last = { status: res.status, msg: res.msg }
-    const retryable = isOverload(res.status, res.msg) || res.status === 429 || res.status === 404
-    if (!retryable) break
-    // Agotados los modelos conocidos: agrega los Flash que tenga disponibles la key.
-    if (i === chain.length - 1 && !extended) {
-      extended = true
-      for (const m of await availableFlashModels(apiKey)) if (!chain.includes(m)) chain.push(m)
-    }
+  } finally {
+    emit(null)
   }
   if (last.status === 429) throw new Error('Llegaste al límite del plan gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo.')
-  if (isOverload(last.status, last.msg)) throw new Error('Los modelos de Gemini están saturados en este momento. Intenta de nuevo en unos minutos.')
+  if (isOverload(last.status, last.msg)) throw new Error('Los modelos de Gemini están saturados o lentos en este momento. Intenta de nuevo en unos minutos.')
   if (last.status === 400 && /API key/i.test(last.msg)) throw new Error('La API key no es válida. Revísala en Ajustes.')
   throw new Error(last.msg)
 }
@@ -291,7 +325,7 @@ export async function analyzePlate(base64: string) {
   const { json, model, latencyMs } = await callGemini(PLATE_PROMPT, [
     { text: `Contexto del usuario: ${JSON.stringify(ctx)}` },
     { inline_data: { mime_type: 'image/jpeg', data: base64 } },
-  ])
+  ], true)
   const result = normalizePlate(json)
   const scanId = await db.scans.add({ createdAt: Date.now(), mode: 'plate', model, latencyMs, raw: json, status: 'ok' })
   return { result, scanId, latencyMs }
@@ -310,7 +344,7 @@ export async function analyzeText(description: string) {
 export async function readLabel(base64: string) {
   const { json, model, latencyMs } = await callGemini(LABEL_PROMPT, [
     { inline_data: { mime_type: 'image/jpeg', data: base64 } },
-  ])
+  ], true)
   await db.scans.add({ createdAt: Date.now(), mode: 'label', model, latencyMs, raw: json, status: 'ok' })
   const r = json as LabelResult
   // Si solo viene por porción, calcula por 100 g.

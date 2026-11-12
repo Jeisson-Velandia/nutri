@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { onAiProgress, type AiProgress } from './lib/gemini'
 
 export function Ring({ value, max, size = 180, stroke = 14, children }: { value: number; max: number; size?: number; stroke?: number; children?: ReactNode }) {
   const r = (size - stroke) / 2
@@ -100,4 +101,20 @@ export const Icon = {
   trash: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
   ),
+}
+
+/** Spinner que muestra qué modelo está respondiendo y cuántos segundos van. */
+export function AiSpinner({ label }: { label: string }) {
+  const [p, setP] = useState<AiProgress | null>(null)
+  const [, tick] = useState(0)
+  useEffect(() => onAiProgress(setP), [])
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 250); return () => clearInterval(t) }, [])
+  const secs = p ? ((performance.now() - p.startedAt) / 1000).toFixed(1) : null
+  return (
+    <div className="flex flex-col items-center gap-2 py-8 text-muted">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-accent" />
+      <p className="text-sm">{label}</p>
+      {p && <p className="text-xs tabular-nums">{secs} s · {p.model}{p.attempt > 1 ? ` (intento ${p.attempt}: el anterior estaba saturado)` : ''}</p>}
+    </div>
+  )
 }
