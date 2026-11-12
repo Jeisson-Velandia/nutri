@@ -165,7 +165,7 @@ async function pullHealthInbox(userId: string) {
       }
       const incoming = {
         steps: num(data.steps, 0),
-        sleepH: num(data.sleepH, 2),
+        sleepH: data.sleep != null ? sleepFromSegments(String(data.sleep), date) : num(data.sleepH, 2),
         activeKcal: num(data.activeKcal, 0),
         weightKg: num(data.weightKg, 1),
       }
@@ -178,6 +178,31 @@ async function pullHealthInbox(userId: string) {
       // Un registro mal formado no debe frenar la sincronización.
     }
   }
+}
+
+/**
+ * El Atajo envía los tramos de sueño (ya sin "En cama" ni "Despierto") como líneas "inicio|fin" (o "inicio|segundos"),
+ * con el inicio en formato ISO 8601. Se suma solo la noche que termina el día indicado:
+ * tramos que empiezan entre las 18:00 del día anterior y las 14:00 de ese día.
+ */
+function sleepFromSegments(text: string, date: string): number | undefined {
+  const [y, m, d] = date.split('-').map(Number)
+  const from = new Date(y, m - 1, d - 1, 18, 0).getTime()
+  const to = new Date(y, m - 1, d, 14, 0).getTime()
+  let secs = 0
+  for (const line of text.split(/\r?\n/)) {
+    const [startRaw, durRaw] = line.split('|').map((x) => x?.trim())
+    if (!startRaw || !durRaw) continue
+    const start = Date.parse(startRaw)
+    // Segunda parte: fecha de fin (ISO) o duración en segundos.
+    const endMs = Date.parse(durRaw)
+    const dur = isFinite(endMs) && /\d{4}-\d{2}-\d{2}/.test(durRaw)
+      ? (endMs - start) / 1000
+      : parseFloat(durRaw.replace(',', '.').replace(/[^\d.]/g, ''))
+    if (!isFinite(start) || !isFinite(dur)) continue
+    if (start >= from && start < to) secs += dur
+  }
+  return secs > 0 ? +(secs / 3600).toFixed(2) : undefined
 }
 
 /** Código que se pega una vez en el Atajo: permite escribir en tu buzón sin guardar tu contraseña. */
