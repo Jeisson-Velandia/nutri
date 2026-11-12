@@ -143,7 +143,27 @@ async function requestOnce(model: string, apiKey: string, system: string, parts:
   return { ok: r.ok, status: r.status, body, msg: body?.error?.message ?? `Error ${r.status}` }
 }
 
-/** Llama al modelo elegido; si está saturado, reintenta una vez y luego prueba con los otros modelos. */
+let flashModelsCache: string[] | null = null
+
+/** Modelos Flash disponibles para esta key (más nuevos primero), para usarlos de respaldo. */
+async function availableFlashModels(apiKey: string): Promise<string[]> {
+  if (flashModelsCache) return flashModelsCache
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': apiKey } })
+    const j = await r.json()
+    const ids: string[] = (j.models ?? [])
+      .filter((m: any) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
+      .map((m: any) => String(m.name).replace(/^models\//, ''))
+      .filter((id: string) => /flash/.test(id) && !/image|tts|audio|live|embedding|thinking|exp/.test(id))
+    const ver = (id: string) => parseFloat(id.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? '0')
+    flashModelsCache = ids.sort((a, b) => ver(b) - ver(a))
+  } catch {
+    flashModelsCache = []
+  }
+  return flashModelsCache
+}
+
+/** Llama al modelo elegido; si está saturado, reintenta una vez y luego prueba con otros modelos Flash. */
 async function callGemini(system: string, parts: any[]): Promise<{ json: any; model: string; latencyMs: number }> {
   const apiKey = await getSetting<string>('apiKey', '')
   if (!apiKey) throw new Error('Falta tu API key de Gemini. Agrégala en Ajustes.')
@@ -151,7 +171,8 @@ async function callGemini(system: string, parts: any[]): Promise<{ json: any; mo
   const chain = [preferred, preferred, ...MODEL_OPTIONS.map((m) => m.id).filter((m) => m !== preferred)]
   const t0 = performance.now()
   let last = { status: 0, msg: '' }
-  for (let i = 0; i < chain.length; i++) {
+  let extended = false
+  for (let i = 0; i < chain.length && i < 7; i++) {
     const model = chain[i]
     if (i === 1) await new Promise((r) => setTimeout(r, 1200))
     const res = await requestOnce(model, apiKey, system, parts)
@@ -165,7 +186,13 @@ async function callGemini(system: string, parts: any[]): Promise<{ json: any; mo
       }
     }
     last = { status: res.status, msg: res.msg }
-    if (!isOverload(res.status, res.msg) && res.status !== 429) break
+    const retryable = isOverload(res.status, res.msg) || res.status === 429 || res.status === 404
+    if (!retryable) break
+    // Agotados los modelos conocidos: agrega los Flash que tenga disponibles la key.
+    if (i === chain.length - 1 && !extended) {
+      extended = true
+      for (const m of await availableFlashModels(apiKey)) if (!chain.includes(m)) chain.push(m)
+    }
   }
   if (last.status === 429) throw new Error('Llegaste al límite del plan gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo.')
   if (isOverload(last.status, last.msg)) throw new Error('Los modelos de Gemini están saturados en este momento. Intenta de nuevo en unos minutos.')
