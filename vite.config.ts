@@ -6,6 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 // BASE_PATH lo define el workflow de GitHub Pages (/<nombre-del-repo>/).
 export default defineConfig({
   base: process.env.BASE_PATH || '/',
+  define: { __BUILD__: JSON.stringify(new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })) },
   server: { host: true },
   plugins: [
     react(),

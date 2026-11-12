@@ -14,6 +14,7 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
   const [status, setStatus] = useState<string | null>(null)
   const [usdaKey, setUsdaKey] = useState('')
   const [healthMsg, setHealthMsg] = useState<string | null>(null)
+  const [healthCode, setHealthCode] = useState<string | null>(null)
   const [usdaStatus, setUsdaStatus] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const scans = useLiveQuery(() => db.scans.toArray()) ?? []
@@ -131,12 +132,17 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
               onClick={async () => {
                 const code = await healthConnectionCode()
                 if (!code) return setHealthMsg('Inicia sesión primero.')
-                try { await navigator.clipboard.writeText(code); setHealthMsg('Código copiado. Pégalo en el Atajo.') }
-                catch { setHealthMsg(code) }
+                setHealthCode(code)
+                try { await navigator.clipboard.writeText(code); setHealthMsg('Código copiado al portapapeles. También está aquí abajo por si lo necesitas.') }
+                catch { setHealthMsg('Mantén presionado el código de abajo → Seleccionar todo → Copiar.') }
               }}
               className="btn-ghost mt-3 w-full"
             >Copiar código de conexión</button>
-            {healthMsg && <p className="mt-2 break-all text-sm text-muted">{healthMsg}</p>}
+            {healthMsg && <p className="mt-2 text-sm text-muted">{healthMsg}</p>}
+            {healthCode && (
+              <textarea readOnly value={healthCode} rows={5} onFocus={(e) => e.currentTarget.select()}
+                className="field mt-2 font-mono text-xs break-all" />
+            )}
           </section>
         )}
 
@@ -195,7 +201,7 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
           </p>
         </section>
 
-        <p className="text-center text-xs text-muted">Nutri · uso personal</p>
+        <p className="text-center text-xs text-muted">Nutri · versión del {__BUILD__}</p>
       </div>
     </div>
   )
