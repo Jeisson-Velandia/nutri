@@ -160,7 +160,7 @@ async function pullHealthInbox(userId: string) {
       const date = String(data.date ?? d.id).slice(0, 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { await deleteDoc(d.ref); continue }
       const num = (v: unknown, decimals: number) => {
-        const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.'))
+        const n = typeof v === 'number' ? v : parseLocaleNumber(String(v ?? ''))
         return isFinite(n) && n > 0 ? +n.toFixed(decimals) : undefined
       }
       const incoming = {
@@ -223,6 +223,29 @@ function sleepFromSegments(text: string, date: string): number | undefined {
     if (start >= from && start < to) secs += dur
   }
   return secs > 0 ? +(secs / 3600).toFixed(2) : undefined
+}
+
+/** Lee números escritos como "8123", "8.123", "8 123", "612,5", "1.612,45" o "1,612.45". */
+export function parseLocaleNumber(raw: string): number {
+  let t = raw.replace(/[^\d.,-]/g, '')
+  if (!t) return NaN
+  const lastDot = t.lastIndexOf('.')
+  const lastComma = t.lastIndexOf(',')
+  if (lastDot >= 0 && lastComma >= 0) {
+    // El separador que aparece de último es el decimal.
+    const dec = lastDot > lastComma ? '.' : ','
+    const thou = dec === '.' ? ',' : '.'
+    t = t.split(thou).join('').replace(dec, '.')
+  } else {
+    const sep = lastDot >= 0 ? '.' : lastComma >= 0 ? ',' : null
+    if (sep) {
+      const parts = t.split(sep)
+      // "8.123" o "1.234.567" → miles; "612,5" o "79.4" → decimal.
+      const isThousands = parts.length > 2 || (parts[parts.length - 1].length === 3 && parts[0].length <= 3 && parts[0] !== '0')
+      t = isThousands ? parts.join('') : parts.join('.')
+    }
+  }
+  return parseFloat(t)
 }
 
 /** Código que se pega una vez en el Atajo: permite escribir en tu buzón sin guardar tu contraseña. */
