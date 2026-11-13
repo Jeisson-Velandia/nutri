@@ -40,6 +40,11 @@ export interface Health extends SyncMeta {
   sleepH?: number
   activeKcal?: number
   weightKg?: number
+  /** Totales de actividad del día (desde Salud): minutos de ejercicio y distancias por deporte. */
+  exerciseMin?: number
+  runKm?: number
+  bikeKm?: number
+  swimM?: number
   /** Entrenamientos del día que llegan del Atajo (Apple Watch, Strava, etc. vía Salud). */
   workouts?: Workout[]
   /** Segundos de sueño que empezaron este día (calendario), según la última lectura del Atajo. */

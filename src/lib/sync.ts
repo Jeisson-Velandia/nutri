@@ -168,6 +168,11 @@ async function pullHealthInbox(userId: string) {
         sleepH: data.sleep != null ? sleepFromSegments(String(data.sleep), date) : num(data.sleepH, 2),
         activeKcal: num(data.activeKcal, 0),
         weightKg: num(data.weightKg, 1),
+        exerciseMin: num(data.exerciseMin, 0),
+        runKm: num(data.runKm, 2),
+        bikeKm: num(data.bikeKm, 1),
+        // Natación: Salud la da en metros; si llega un número pequeño, venía en km.
+        swimM: (() => { const v = num(data.swimM, 2); return v == null ? undefined : v < 20 ? Math.round(v * 1000) : Math.round(v) })(),
       }
       const current = await db.health.get(date)
       const merged: any = { ...(current ?? {}), date, source: 'shortcut' }

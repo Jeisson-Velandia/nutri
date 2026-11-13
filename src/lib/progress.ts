@@ -57,7 +57,8 @@ export async function loadDays(profile: Profile, from: string): Promise<DayStat[
     const es = entries.filter((e) => e.date === d)
     const h = hBy.get(d)
     const [y, m, dd] = d.split('-').map(Number)
-    const training = dBy.get(d)?.training ?? ((h?.workouts?.length ?? 0) > 0 || (profile.trainingDays ?? []).includes(new Date(y, m - 1, dd).getDay()))
+    const exercised = (h?.exerciseMin ?? 0) >= 20 || !!h?.runKm || !!h?.bikeKm || !!h?.swimM
+    const training = dBy.get(d)?.training ?? ((h?.workouts?.length ?? 0) > 0 || exercised || (profile.trainingDays ?? []).includes(new Date(y, m - 1, dd).getDay()))
     if (trendBy.has(d)) lastTrend = trendBy.get(d)
     out.push({
       date: d,

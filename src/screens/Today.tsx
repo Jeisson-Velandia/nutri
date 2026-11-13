@@ -28,7 +28,8 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
   const weekday = new Date(y, mo - 1, d).getDay()
   const workouts = health?.workouts ?? []
   // Si hubo entreno registrado en Salud, el día cuenta como de entreno (salvo que lo cambies a mano).
-  const training = daily?.training ?? (workouts.length > 0 || (profile.trainingDays ?? []).includes(weekday))
+  const exercised = (health?.exerciseMin ?? 0) >= 20 || !!health?.runKm || !!health?.bikeKm || !!health?.swimM
+  const training = daily?.training ?? (workouts.length > 0 || exercised || (profile.trainingDays ?? []).includes(weekday))
   const t = { ...profile.targets, ...targetsForDay(profile.targets, training) }
   const sum = entries.reduce(
     (a, e) => ({ kcal: a.kcal + e.kcal, p: a.p + e.protein_g, c: a.c + e.carbs_g, f: a.f + e.fat_g }),
@@ -86,6 +87,14 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
         <HealthStat label="Calorías activas" value={health?.activeKcal != null ? `${Math.round(health.activeKcal)} kcal` : '—'} goal="" pct={0} color="var(--color-fat)" />
         <HealthStat label="Peso" value={health?.weightKg != null ? `${health.weightKg} kg` : '—'} goal="" pct={0} color="var(--color-carbs)" />
       </button>
+      {(health?.exerciseMin || health?.runKm || health?.bikeKm || health?.swimM) ? (
+        <div className="mx-5 mt-3 grid grid-cols-4 gap-2 text-center">
+          <Mini label="Ejercicio" value={health?.exerciseMin ? `${health.exerciseMin} min` : '—'} />
+          <Mini label="Correr" value={health?.runKm ? `${health.runKm.toLocaleString('es-CO')} km` : '—'} />
+          <Mini label="Bici" value={health?.bikeKm ? `${health.bikeKm.toLocaleString('es-CO')} km` : '—'} />
+          <Mini label="Natación" value={health?.swimM ? `${health.swimM.toLocaleString('es-CO')} m` : '—'} />
+        </div>
+      ) : null}
       {workouts.length > 0 && (
         <div className="mx-5 mt-3 rounded-2xl border border-line bg-card p-4">
           <div className="text-sm text-muted">Entrenamientos</div>
@@ -252,6 +261,15 @@ function EditHealth({ date, health, onClose }: { date: string; health?: Health; 
           className="btn-primary mt-5 w-full"
         >Guardar</button>
       </div>
+    </div>
+  )
+}
+
+function Mini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-card px-1 py-2">
+      <div className="text-[10px] text-muted">{label}</div>
+      <div className="truncate text-xs font-semibold tabular-nums">{value}</div>
     </div>
   )
 }
