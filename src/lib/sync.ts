@@ -227,12 +227,13 @@ function sleepFromSegments(text: string, date: string): number | undefined {
 }
 
 /**
- * Entrenamientos como líneas "tipo|duración|kcal|distancia" (las tres últimas opcionales).
+ * Entrenamientos como "tipo|duración|kcal|distancia", separados por ";;" (las tres últimas opcionales).
  * La duración puede venir como segundos, "1:02:03", "62:03" o "1 h 2 min".
  */
 export function parseWorkouts(text: string) {
   const out: { type: string; minutes?: number; kcal?: number; km?: number }[] = []
-  for (const line of text.split(/\r?\n/)) {
+  // Separador entre entrenamientos: ";;" (un salto de línea rompería el JSON del Atajo) o nueva línea.
+  for (const line of text.split(/;;|\r?\n/)) {
     const [typeRaw, durRaw, kcalRaw, distRaw] = line.split('|').map((x) => (x ?? '').trim())
     if (!typeRaw) continue
     const minutes = durationToMinutes(durRaw)
