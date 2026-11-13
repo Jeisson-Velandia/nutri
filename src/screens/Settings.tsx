@@ -139,6 +139,9 @@ export default function Settings({ nav, profile, onSignedOut }: { nav: Nav; prof
               className="btn-ghost mt-3 w-full"
             >Copiar código de conexión</button>
             {healthMsg && <p className="mt-2 text-sm text-muted">{healthMsg}</p>}
+            <label className="mt-3 block text-xs text-muted">Nombre de tu Atajo (para el botón "Actualizar desde Salud")
+              <input defaultValue={localStorage.getItem('nutri-shortcut-name') || 'Nutrí'} onChange={(e) => localStorage.setItem('nutri-shortcut-name', e.target.value.trim())} className="field mt-1" />
+            </label>
             {healthCode && (
               <textarea readOnly value={healthCode} rows={5} onFocus={(e) => e.currentTarget.select()}
                 className="field mt-2 font-mono text-xs break-all" />
