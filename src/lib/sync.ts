@@ -172,6 +172,7 @@ async function pullHealthInbox(userId: string) {
       const current = await db.health.get(date)
       const merged: any = { ...(current ?? {}), date, source: 'shortcut' }
       for (const [k, v] of Object.entries(incoming)) if (v != null) merged[k] = v
+      if (data.workouts != null) merged.workouts = parseWorkouts(String(data.workouts))
 
       // Sueño con dos sumas (en segundos) que Atajos sí calcula bien:
       //   hoySec  = sueño que empezó hoy desde las 00:00
@@ -223,6 +224,46 @@ function sleepFromSegments(text: string, date: string): number | undefined {
     if (start >= from && start < to) secs += dur
   }
   return secs > 0 ? +(secs / 3600).toFixed(2) : undefined
+}
+
+/**
+ * Entrenamientos como líneas "tipo|duración|kcal|distancia" (las tres últimas opcionales).
+ * La duración puede venir como segundos, "1:02:03", "62:03" o "1 h 2 min".
+ */
+export function parseWorkouts(text: string) {
+  const out: { type: string; minutes?: number; kcal?: number; km?: number }[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const [typeRaw, durRaw, kcalRaw, distRaw] = line.split('|').map((x) => (x ?? '').trim())
+    if (!typeRaw) continue
+    const minutes = durationToMinutes(durRaw)
+    const kcal = parseLocaleNumber(kcalRaw ?? '')
+    let km = parseLocaleNumber(distRaw ?? '')
+    if (/\bm\b/i.test(distRaw ?? '') && !/km/i.test(distRaw ?? '')) km = km / 1000 // vino en metros
+    out.push({
+      type: typeRaw,
+      minutes: minutes && minutes > 0 ? Math.round(minutes) : undefined,
+      kcal: isFinite(kcal) && kcal > 0 ? Math.round(kcal) : undefined,
+      km: isFinite(km) && km > 0 ? +km.toFixed(2) : undefined,
+    })
+  }
+  return out
+}
+
+function durationToMinutes(raw?: string): number | undefined {
+  if (!raw) return undefined
+  const t = raw.trim()
+  const hms = t.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/)
+  if (hms) {
+    const [a, b, c] = [hms[1], hms[2], hms[3]].map((x) => (x ? +x : 0))
+    return hms[3] != null ? a * 60 + b + c / 60 : a + b / 60 // h:mm:ss o mm:ss
+  }
+  const h = t.match(/(\d+[.,]?\d*)\s*h/i)
+  const m = t.match(/(\d+[.,]?\d*)\s*min/i)
+  const sec = t.match(/(\d+[.,]?\d*)\s*s(?:eg)?\b/i)
+  if (h || m) return (h ? parseLocaleNumber(h[1]) * 60 : 0) + (m ? parseLocaleNumber(m[1]) : 0) + (sec ? parseLocaleNumber(sec[1]) / 60 : 0)
+  const n = parseLocaleNumber(t)
+  if (!isFinite(n)) return undefined
+  return n > 600 ? n / 60 : n // número suelto: segundos si es grande, si no minutos
 }
 
 /** Lee números escritos como "8123", "8.123", "8 123", "612,5", "1.612,45" o "1,612.45". */

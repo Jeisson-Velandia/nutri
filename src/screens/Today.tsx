@@ -26,7 +26,9 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
 
   const [y, mo, d] = date.split('-').map(Number)
   const weekday = new Date(y, mo - 1, d).getDay()
-  const training = daily?.training ?? (profile.trainingDays ?? []).includes(weekday)
+  const workouts = health?.workouts ?? []
+  // Si hubo entreno registrado en Salud, el día cuenta como de entreno (salvo que lo cambies a mano).
+  const training = daily?.training ?? (workouts.length > 0 || (profile.trainingDays ?? []).includes(weekday))
   const t = { ...profile.targets, ...targetsForDay(profile.targets, training) }
   const sum = entries.reduce(
     (a, e) => ({ kcal: a.kcal + e.kcal, p: a.p + e.protein_g, c: a.c + e.carbs_g, f: a.f + e.fat_g }),
@@ -78,11 +80,27 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
         <MacroBar label="Grasa" value={sum.f} max={t.fat_g} color="var(--color-fat)" />
       </div>
 
-      <button onClick={() => setEditHealth(true)} className="mx-5 mt-5 grid w-[calc(100%-2.5rem)] grid-cols-3 gap-2 text-left">
+      <button onClick={() => setEditHealth(true)} className="mx-5 mt-5 grid w-[calc(100%-2.5rem)] grid-cols-2 gap-2 text-left">
         <HealthStat label="Pasos" value={health?.steps != null ? health.steps.toLocaleString('es-CO') : '—'} goal={t.steps ? `/ ${(t.steps / 1000).toFixed(t.steps % 1000 ? 1 : 0)}k` : ''} pct={health?.steps != null && t.steps ? health.steps / t.steps : 0} color="var(--color-accent)" />
         <HealthStat label="Sueño" value={health?.sleepH != null ? `${Math.floor(health.sleepH)}h ${String(Math.round((health.sleepH % 1) * 60)).padStart(2, '0')}` : '—'} goal={t.sleepH ? `/ ${t.sleepH} h` : ''} pct={health?.sleepH != null && t.sleepH ? health.sleepH / t.sleepH : 0} color="var(--color-protein)" />
+        <HealthStat label="Calorías activas" value={health?.activeKcal != null ? `${Math.round(health.activeKcal)} kcal` : '—'} goal="" pct={0} color="var(--color-fat)" />
         <HealthStat label="Peso" value={health?.weightKg != null ? `${health.weightKg} kg` : '—'} goal="" pct={0} color="var(--color-carbs)" />
       </button>
+      {workouts.length > 0 && (
+        <div className="mx-5 mt-3 rounded-2xl border border-line bg-card p-4">
+          <div className="text-sm text-muted">Entrenamientos</div>
+          <ul className="mt-2 space-y-2">
+            {workouts.map((w, i) => (
+              <li key={i} className="flex items-center justify-between text-sm">
+                <span className="font-medium">{w.type}</span>
+                <span className="text-muted tabular-nums">
+                  {[w.minutes ? `${w.minutes} min` : null, w.km ? `${w.km} km` : null, w.kcal ? `${w.kcal} kcal` : null].filter(Boolean).join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {health?.sleepH != null && t.sleepH && health.sleepH < t.sleepH - 1 && (
         <p className="mx-5 mt-2 rounded-xl bg-carbs/10 px-3 py-2 text-xs text-carbs">Dormiste poco: es normal tener más hambre hoy. Prioriza proteína y verduras para llenarte sin pasarte.</p>
       )}

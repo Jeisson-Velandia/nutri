@@ -38,10 +38,14 @@ export interface Health extends SyncMeta {
   sleepH?: number
   activeKcal?: number
   weightKg?: number
+  /** Entrenamientos del día que llegan del Atajo (Apple Watch, Strava, etc. vía Salud). */
+  workouts?: Workout[]
   /** Segundos de sueño que empezaron este día (calendario), según la última lectura del Atajo. */
   sleepTodaySec?: number
   source?: 'shortcut' | 'manual'
 }
+
+export interface Workout { type: string; minutes?: number; kcal?: number; km?: number; start?: string }
 
 /** Resumen del día que la app publica para que el Atajo lo registre en Salud. Clave = fecha. */
 export interface Daily extends SyncMeta {
