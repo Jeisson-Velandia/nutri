@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { Nav } from '../App'
 import { db, shiftDate, todayISO, type Profile } from '../lib/db'
 import { avg, estimateTdee, loadDays, project, type DayStat } from '../lib/progress'
+import WeeklyCard from './WeeklyCard'
 
 type Range = 7 | 30 | 90
 const RANGES: { id: Range; label: string }[] = [
@@ -59,6 +60,8 @@ export default function Progress({ nav, profile }: { nav: Nav; profile: Profile 
           ))}
         </div>
       </div>
+
+      {all && <WeeklyCard all={all} profile={profile} />}
 
       {/* Proyección */}
       <section className="mx-5 mt-4 rounded-2xl border border-line bg-card p-4">

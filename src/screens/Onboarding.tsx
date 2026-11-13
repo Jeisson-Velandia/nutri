@@ -18,12 +18,13 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
   const [stepsTarget, setSteps] = useState(existing?.stepsTarget ?? GOALS[existing?.goal ?? 'cut'].steps)
   const [sleepTarget, setSleep] = useState(existing?.sleepTarget ?? 7.5)
   const [targetWeight, setTargetWeight] = useState<number>(existing?.targetWeightKg ?? 0)
+  const [calibration, setCalibration] = useState<number>(existing?.calibrationKcal ?? 0)
 
   const g = GOALS[goal]
   const age = new Date().getFullYear() - birthYear
   const targets = useMemo(
-    () => computeTargets({ sex, age, heightCm, weightKg, activity, goal, ratePctWeek: rate, trainingDays, carbCycling, stepsTarget, sleepTarget }),
-    [sex, age, heightCm, weightKg, activity, goal, rate, trainingDays, carbCycling, stepsTarget, sleepTarget],
+    () => computeTargets({ sex, age, heightCm, weightKg, activity, goal, ratePctWeek: rate, trainingDays, carbCycling, stepsTarget, sleepTarget, calibrationKcal: calibration }),
+    [sex, age, heightCm, weightKg, activity, goal, rate, trainingDays, carbCycling, stepsTarget, sleepTarget, calibration],
   )
 
   function pickGoal(x: Goal) {
@@ -38,6 +39,7 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
       ratePctWeek: g.rate ? rate : 0, trainingDays, carbCycling, stepsTarget, sleepTarget, targets,
       targetWeightKg: targetWeight > 0 ? targetWeight : undefined,
       useActiveKcal,
+      calibrationKcal: calibration || undefined,
     })
     // El peso del perfil también queda en el historial de hoy (para Progreso).
     const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)
@@ -148,6 +150,12 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
         </div>
         {carbCycling && targets.kcalTrain !== targets.kcalRest && (
           <p className="mt-3 text-xs text-muted tabular-nums">Entreno: {targets.kcalTrain} kcal · {targets.carbsTrain} g carbos — Descanso: {targets.kcalRest} kcal · {targets.carbsRest} g carbos</p>
+        )}
+        {calibration !== 0 && (
+          <p className="mt-2 text-xs text-accent">
+            Incluye {calibration > 0 ? '+' : ''}{calibration} kcal de tus revisiones semanales.{' '}
+            <button onClick={() => setCalibration(0)} className="underline">Quitar ajuste</button>
+          </p>
         )}
         <p className="mt-2 text-xs text-muted">TMB {targets.bmr} kcal · Gasto total {targets.tdee} kcal · Agua {targets.water_ml / 1000} L</p>
       </div>

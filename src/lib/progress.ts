@@ -153,3 +153,99 @@ export function avg(nums: (number | undefined)[]) {
   const v = nums.filter((n): n is number => n != null && isFinite(n))
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined
 }
+
+// ---------- Revisión semanal ----------
+
+export interface WeeklyReview {
+  start: string // lunes
+  end: string   // domingo
+  loggedDays: number
+  avgKcal?: number
+  avgTarget?: number
+  avgProtein?: number
+  proteinTarget: number
+  avgSteps?: number
+  avgActive?: number
+  exerciseMin: number
+  trainingDays: number
+  weighIns: number
+  weekChangeKg?: number   // cambio de la tendencia en la semana
+  actualRate?: number     // kg/semana (últimas 2 semanas de tendencia)
+  plannedRate: number
+  tdeeEst?: number
+  rec: {
+    status: 'insufficient' | 'adherence' | 'on_track' | 'adjust'
+    deltaKcal: number
+    reason: string
+  }
+  days: DayStat[]
+}
+
+/** Lunes de la semana pasada completa (o de la semana que terminó ayer si hoy es lunes). */
+export function lastWeekStart(today = todayISO()) {
+  const [y, m, d] = today.split('-').map(Number)
+  const wd = new Date(y, m - 1, d).getDay() // 0 = domingo
+  const thisMonday = shiftDate(today, -((wd + 6) % 7))
+  return shiftDate(thisMonday, -7)
+}
+
+const MAX_STEP = 150 // kcal por semana, para ajustar con calma
+
+export function weeklyReview(all: DayStat[], profile: Profile, start: string, health: { date: string; exerciseMin?: number }[]): WeeklyReview {
+  const end = shiftDate(start, 6)
+  const week = all.filter((d) => d.date >= start && d.date <= end)
+  const logged = week.filter((d) => d.logged && d.kcal > 600)
+  const avgKcal = avg(logged.map((d) => d.kcal))
+  const avgTarget = avg(logged.map((d) => d.targetKcal))
+  const trendAt = (iso: string) => all.filter((d) => d.date <= iso && d.trendKg != null).pop()?.trendKg
+  const t0 = trendAt(shiftDate(start, -1)), t1 = trendAt(end)
+  const t14 = trendAt(shiftDate(end, -14))
+  const weighIns14 = all.filter((d) => d.weightKg != null && d.date > shiftDate(end, -14) && d.date <= end).length
+  const actualRate = t1 != null && t14 != null ? +(((t1 - t14) / 14) * 7).toFixed(2) : undefined
+  const plannedRate = profile.goal === 'cut' || profile.goal === 'bulk' ? (profile.targets.kgWeek ?? 0) : 0
+  const tdee = estimateTdee(all.filter((d) => d.date <= end))
+  const exerciseMin = week.reduce((a, d) => a + (health.find((h) => h.date === d.date)?.exerciseMin ?? 0), 0)
+
+  const base: Omit<WeeklyReview, 'rec'> = {
+    start, end, loggedDays: logged.length, avgKcal, avgTarget,
+    avgProtein: avg(logged.map((d) => d.protein_g)), proteinTarget: profile.targets.protein_g,
+    avgSteps: avg(week.map((d) => d.steps)), avgActive: avg(week.map((d) => d.activeKcal)),
+    exerciseMin, trainingDays: week.filter((d) => d.training).length,
+    weighIns: week.filter((d) => d.weightKg != null).length,
+    weekChangeKg: t0 != null && t1 != null ? +(t1 - t0).toFixed(2) : undefined,
+    actualRate, plannedRate, tdeeEst: tdee?.tdee, days: week,
+  }
+
+  // 1) ¿Hay datos suficientes?
+  if (logged.length < 5 || weighIns14 < 3 || actualRate == null) {
+    return { ...base, rec: { status: 'insufficient', deltaKcal: 0,
+      reason: `Para ajustar con confianza necesito al menos 5 días registrados (llevas ${logged.length}) y 3 pesajes en 2 semanas (llevas ${weighIns14}).` } }
+  }
+  // 2) Si no se cumplió la meta, el problema no es la meta.
+  if (avgKcal != null && avgTarget != null && Math.abs(avgKcal - avgTarget) > 150) {
+    const over = avgKcal > avgTarget
+    return { ...base, rec: { status: 'adherence', deltaKcal: 0,
+      reason: `Comiste en promedio ${Math.round(Math.abs(avgKcal - avgTarget))} kcal ${over ? 'por encima' : 'por debajo'} de tu meta. Antes de cambiarla, intenta cumplirla una semana más; así sabremos si funciona.` } }
+  }
+  // 3) Ajuste según el gasto real (si se puede) o según la diferencia de ritmo.
+  let delta: number
+  if (tdee) {
+    const ideal = tdee.tdee + (plannedRate * 7700) / 7
+    delta = ideal - profile.targets.kcal
+  } else {
+    delta = (-(actualRate - plannedRate) * 7700) / 7
+  }
+  delta = Math.max(-MAX_STEP, Math.min(MAX_STEP, Math.round(delta / 10) * 10))
+  const diff = actualRate - plannedRate
+  if (Math.abs(delta) < 50 || Math.abs(diff) < 0.1) {
+    return { ...base, rec: { status: 'on_track', deltaKcal: 0,
+      reason: `Vas a ${fmtRate(actualRate)} y tu plan es ${fmtRate(plannedRate)}. Vas bien: mantenemos la meta.` } }
+  }
+  const why = profile.goal === 'cut'
+    ? diff > 0 ? `Estás bajando más lento que el plan (${fmtRate(actualRate)} vs ${fmtRate(plannedRate)}).` : `Estás bajando más rápido que el plan (${fmtRate(actualRate)} vs ${fmtRate(plannedRate)}); eso pone en riesgo el músculo y el rendimiento.`
+    : `Tu ritmo real es ${fmtRate(actualRate)} y el plan es ${fmtRate(plannedRate)}.`
+  return { ...base, rec: { status: 'adjust', deltaKcal: delta,
+    reason: `${why} Propongo ${delta > 0 ? 'subir' : 'bajar'} ${Math.abs(delta)} kcal/día${tdee ? `, con tu gasto real estimado de ${tdee.tdee.toLocaleString('es-CO')} kcal` : ''}.` } }
+}
+
+const fmtRate = (r: number) => `${r > 0 ? '+' : ''}${r.toLocaleString('es-CO', { maximumFractionDigits: 2 })} kg/sem`

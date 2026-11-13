@@ -457,3 +457,27 @@ export async function generateCoachPlan(context: unknown): Promise<{ plan: Coach
   plan.nutrition.tips ??= []
   return { plan, model }
 }
+
+// ---------- Resumen semanal ----------
+
+export interface WeeklySummary {
+  headline: string
+  wins: string[]
+  issues: string[]
+  actions: string[]
+  note?: string
+}
+
+export const WEEKLY_PROMPT = `Eres un coach de nutrición y entrenamiento que revisa la semana de una persona. Hablas en español neutro de Colombia, de tú, directo y concreto, sin exagerar ni regañar. Devuelve SOLO un JSON válido:
+{ "headline": string (una frase con el resultado principal de la semana, con un número),
+  "wins": [string] (2–3 cosas que hizo bien, con datos),
+  "issues": [string] (1–3 problemas concretos con datos: días o comidas donde se desvió, poca proteína, pocos pasos, poco sueño…),
+  "actions": [string] (exactamente 3 acciones específicas y realizables para la próxima semana, p. ej. "Agrega 1 yogur griego en la merienda: +15 g de proteína"),
+  "note": string (opcional, una línea sobre el ajuste de calorías propuesto por la app, sin contradecirlo) }
+Reglas: usa solo los datos dados; si faltan datos dilo en issues; no des consejos médicos; nada de emojis; frases cortas.`
+
+export async function weeklySummary(context: unknown): Promise<WeeklySummary> {
+  const { json } = await callGemini(WEEKLY_PROMPT, [{ text: `Semana del usuario: ${JSON.stringify(context)}` }], false, 45000)
+  const arr = (v: any) => (Array.isArray(v) ? v.map(String).slice(0, 4) : [])
+  return { headline: String(json?.headline ?? ''), wins: arr(json?.wins), issues: arr(json?.issues), actions: arr(json?.actions).slice(0, 3), note: json?.note ? String(json.note) : undefined }
+}

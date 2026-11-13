@@ -30,6 +30,8 @@ export interface Profile extends SyncMeta {
   sleepTarget: number
   /** Sumar a la meta del día las calorías activas del reloj (en vez del factor de actividad fijo). */
   useActiveKcal?: boolean
+  /** Ajuste acumulado de las revisiones semanales (kcal/día, negativo = menos). */
+  calibrationKcal?: number
   /** Peso al que quieres llegar (para la proyección). */
   targetWeightKg?: number
   targets: Targets

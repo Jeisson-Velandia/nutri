@@ -48,6 +48,8 @@ export interface BodyInput {
   carbCycling: boolean
   stepsTarget: number
   sleepTarget: number
+  /** Ajuste acumulado de las revisiones semanales (kcal/día). */
+  calibrationKcal?: number
 }
 
 /** Mifflin-St Jeor → TDEE → ajuste por objetivo (7.700 kcal ≈ 1 kg) → macros y ciclado de carbohidratos. */
@@ -58,7 +60,7 @@ export function computeTargets(b: BodyInput): Targets {
   const kgWeek = g.rate ? (b.ratePctWeek / 100) * b.weightKg : 0
   const adj = g.rate ? (kgWeek * 7700) / 7 : (g.kcalAdj ?? 0) * tdee
   const floor = Math.max(b.sex === 'male' ? 1500 : 1200, Math.round(bmr))
-  const kcal = Math.max(floor, Math.round((tdee + adj) / 10) * 10)
+  const kcal = Math.max(floor, Math.round((tdee + adj + (b.calibrationKcal ?? 0)) / 10) * 10)
 
   const protein_g = Math.round(b.weightKg * g.proteinPerKg)
   const fat_g = Math.max(Math.round(b.weightKg * 0.6), Math.round((kcal * g.fatPct) / 9))
@@ -109,4 +111,16 @@ export function dayTargets(
   const kcal = Math.max(calmDay, withActivity)
   const carbs_g = Math.max(0, Math.round((kcal - t.protein_g * 4 - t.fat_g * 9) / 4))
   return { kcal, carbs_g, base: calmDay, fromActivity: kcal - calmDay, dynamic: true }
+}
+
+/** Recalcula las metas de un perfil guardado (por ejemplo, tras aplicar una revisión semanal). */
+export function targetsFromProfile(p: {
+  sex: Sex; birthYear: number; heightCm: number; weightKg: number; activity: Activity; goal: Goal
+  ratePctWeek: number; trainingDays: number[]; carbCycling: boolean; stepsTarget: number; sleepTarget: number; calibrationKcal?: number
+}) {
+  return computeTargets({
+    sex: p.sex, age: new Date().getFullYear() - p.birthYear, heightCm: p.heightCm, weightKg: p.weightKg, activity: p.activity,
+    goal: p.goal, ratePctWeek: p.ratePctWeek, trainingDays: p.trainingDays, carbCycling: p.carbCycling,
+    stepsTarget: p.stepsTarget, sleepTarget: p.sleepTarget, calibrationKcal: p.calibrationKcal,
+  })
 }

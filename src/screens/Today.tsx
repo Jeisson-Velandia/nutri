@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { Nav } from '../App'
 import { db, MEAL_LABEL, shiftDate, todayISO, type Entry, type Health, type Meal, type Profile } from '../lib/db'
 import { dayTargets } from '../lib/nutrition'
+import { lastWeekStart } from '../lib/progress'
 import { Icon, MacroBar, Ring } from '../ui'
 
 const MEALS: Meal[] = ['breakfast', 'lunch', 'dinner', 'snack']
@@ -23,6 +24,9 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
   const daily = useLiveQuery(() => db.daily.get(date), [date])
   const [editing, setEditing] = useState<Entry | null>(null)
   const [editHealth, setEditHealth] = useState(false)
+  const checkin = useLiveQuery(() => db.coach.get(`checkin:${lastWeekStart()}`), [])
+  const wdToday = new Date().getDay()
+  const showCheckin = date === todayISO() && (wdToday === 1 || wdToday === 2) && checkin === undefined
 
   const [y, mo, d] = date.split('-').map(Number)
   const weekday = new Date(y, mo - 1, d).getDay()
@@ -60,6 +64,13 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
           </div>
         </div>
       </div>
+
+      {showCheckin && (
+        <button onClick={() => nav.go({ name: 'progress' })} className="mx-5 mt-3 flex w-[calc(100%-2.5rem)] items-center justify-between rounded-2xl border border-accent/50 bg-accent/10 px-4 py-3 text-left text-sm">
+          <span><b className="text-accent">Tu revisión semanal está lista.</b><br /><span className="text-muted">Mira cómo te fue y si toca ajustar tu meta.</span></span>
+          <span className="text-accent">›</span>
+        </button>
+      )}
 
       <div className="mt-4 flex justify-center">
         <Ring value={sum.kcal} max={t.kcal} size={200}>
