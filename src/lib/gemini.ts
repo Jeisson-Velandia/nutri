@@ -215,13 +215,13 @@ async function availableFlashModels(apiKey: string): Promise<string[]> {
 }
 
 /** Llama al modelo elegido; si está saturado, reintenta una vez y luego prueba con otros modelos Flash. */
-async function callGemini(system: string, parts: any[], hasImage = false): Promise<{ json: any; model: string; latencyMs: number }> {
+async function callGemini(system: string, parts: any[], hasImage = false, timeoutOverride?: number): Promise<{ json: any; model: string; latencyMs: number }> {
   const apiKey = await getSetting<string>('apiKey', '')
   if (!apiKey) throw new Error('Falta tu API key de Gemini. Agrégala en Ajustes.')
   const preferred = await getSetting<string>('model', DEFAULT_MODEL)
   // Empieza por el último modelo que respondió bien; sin esperas entre intentos.
   const chain = [...new Set([lastGoodModel(), preferred, ...MODEL_OPTIONS.map((m) => m.id)].filter(Boolean) as string[])]
-  const timeoutMs = hasImage ? 20000 : 12000
+  const timeoutMs = timeoutOverride ?? (hasImage ? 20000 : 12000)
   const t0 = performance.now()
   let last = { status: 0, msg: '' }
   let extended = false
@@ -373,4 +373,87 @@ export async function testKey(apiKey: string, model: string): Promise<'ok' | 'bu
   if (res.ok) return 'ok'
   if (isOverload(res.status, res.msg) || res.status === 429) return 'busy'
   throw new Error(res.msg)
+}
+
+// ---------- Coach: plan de entrenamiento y nutrición ----------
+
+export interface CoachPrefs {
+  sports: string[]          // gym, correr, bici, natación, …
+  days: number[]            // 0 = domingo
+  minutes: number           // por sesión
+  level: 'principiante' | 'intermedio' | 'avanzado'
+  place: 'gimnasio' | 'casa' | 'mixto'
+  injuries: string
+  mealsPerDay: number
+  avoidFoods: string
+  notes: string
+}
+
+export interface CoachExercise { name: string; sets?: number; reps?: string; rest_s?: number; notes?: string }
+export interface CoachSession {
+  day: number               // 0 = domingo
+  title: string
+  type: 'fuerza' | 'correr' | 'bici' | 'natacion' | 'brick' | 'movilidad' | 'descanso' | 'otro'
+  duration_min: number
+  intensity: string         // p. ej. "Zona 2", "RPE 7", "suave"
+  focus?: string
+  warmup?: string
+  exercises: CoachExercise[]
+  cooldown?: string
+}
+export interface CoachWeek { week: number; theme: string; sessions: CoachSession[] }
+export interface CoachMealOption { description: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number }
+export interface CoachMeal { name: string; time: string; share_pct: number; options: CoachMealOption[] }
+export interface CoachPlan {
+  summary: string
+  weeks: CoachWeek[]
+  nutrition: { training_day: CoachMeal[]; rest_day: CoachMeal[]; tips: string[] }
+  progression: string
+}
+
+export const COACH_PROMPT = `Eres un entrenador personal certificado y nutricionista deportivo. Diseñas planes realistas, seguros y progresivos para una sola persona, en español neutro de Colombia. Devuelve SOLO un objeto JSON válido con el formato indicado, sin texto fuera del JSON.
+
+ENTRENAMIENTO
+1. Plan de 4 semanas: semanas 1–3 con progresión (volumen o intensidad suben poco a poco) y semana 4 de descarga (~30 % menos volumen).
+2. Usa SOLO los días disponibles del usuario; los demás días van con type "descanso" o "movilidad" ligera. Respeta los minutos por sesión.
+3. Combina los deportes que indique. Si hace triatlón o resistencia: reparte natación, bici y carrera con mayoría de trabajo suave (zona 2) y 1–2 sesiones de calidad por semana; fuerza 2 días.
+4. Según el objetivo: definición → mantener fuerza pesada (protege el músculo) y algo más de volumen aeróbico suave; volumen → más series de fuerza por grupo muscular, cardio moderado; recomposición/mantenimiento → equilibrio.
+5. Fuerza: 4–7 ejercicios por sesión con series, repeticiones (rango, p. ej. "8-10") y descanso en segundos. Cardio: describe la sesión en exercises (p. ej. {"name":"Calentamiento","notes":"10 min suave"}, {"name":"Bloque principal","notes":"5×4 min zona 4, 2 min suave"}).
+6. Adapta a lesiones y nivel. Nada peligroso para un principiante.
+
+NUTRICIÓN
+7. Plan de comidas para día de entreno y día de descanso, con el número de comidas indicado, repartiendo las calorías y macros objetivo del contexto (share_pct suma 100 en cada día).
+8. Cada comida con 2 opciones con comida colombiana real y cantidades (p. ej. "2 huevos pericos + 1 arepa mediana (80 g) + 1 taza de papaya"), con kcal y macros estimados de esa opción.
+9. Evita los alimentos que el usuario no come. Prioriza proteína en todas las comidas. Comida pre y post entreno en días de entreno.
+10. 4–6 tips cortos y concretos (hidratación, sueño, timing).
+
+FORMATO
+{
+  "summary": string,
+  "progression": string,
+  "weeks": [{ "week": 1, "theme": string, "sessions": [{
+     "day": 0-6 (0 = domingo), "title": string,
+     "type": "fuerza"|"correr"|"bici"|"natacion"|"brick"|"movilidad"|"descanso"|"otro",
+     "duration_min": number, "intensity": string, "focus": string,
+     "warmup": string, "exercises": [{ "name": string, "sets": number, "reps": string, "rest_s": number, "notes": string }], "cooldown": string }] }],
+  "nutrition": {
+    "training_day": [{ "name": string, "time": "HH:MM", "share_pct": number, "options": [{ "description": string, "kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number }] }],
+    "rest_day": [ igual ],
+    "tips": [string]
+  }
+}
+Cada semana debe tener exactamente 7 sesiones, una por día (0 a 6).`
+
+export async function generateCoachPlan(context: unknown): Promise<{ plan: CoachPlan; model: string }> {
+  const { json, model } = await callGemini(COACH_PROMPT, [{ text: `Datos del usuario y metas: ${JSON.stringify(context)}` }], false, 120000)
+  const plan = json as CoachPlan
+  if (!Array.isArray(plan?.weeks) || !plan.weeks.length || !plan.nutrition) throw new Error('El plan llegó incompleto. Intenta generarlo otra vez.')
+  plan.weeks.forEach((w, i) => {
+    w.week = w.week ?? i + 1
+    w.sessions = (w.sessions ?? []).map((s) => ({ ...s, exercises: Array.isArray(s.exercises) ? s.exercises : [] }))
+  })
+  plan.nutrition.training_day ??= []
+  plan.nutrition.rest_day ??= plan.nutrition.training_day
+  plan.nutrition.tips ??= []
+  return { plan, model }
 }

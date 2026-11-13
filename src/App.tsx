@@ -13,6 +13,8 @@ import Review from './screens/Review'
 import AddFood from './screens/AddFood'
 import Portion from './screens/Portion'
 import Settings from './screens/Settings'
+import Progress from './screens/Progress'
+import Coach from './screens/Coach'
 import { Icon, Spinner } from './ui'
 
 export type View =
@@ -23,6 +25,8 @@ export type View =
   | { name: 'portion'; product: OffProduct | PortionFood }
   | { name: 'settings' }
   | { name: 'profile' }
+  | { name: 'progress' }
+  | { name: 'coach' }
 
 export interface PortionFood {
   name: string
@@ -121,7 +125,7 @@ function Main({ onSignedOut }: { onSignedOut: () => void }) {
   if (profile === 'loading') return null
   if (!profile || view.name === 'profile') return <Onboarding existing={profile ?? undefined} onDone={() => setStack([{ name: 'today' }])} />
 
-  const tabbed = view.name === 'today' || view.name === 'add' || view.name === 'settings'
+  const tabbed = ['today', 'add', 'settings', 'progress', 'coach'].includes(view.name)
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col">
@@ -134,13 +138,16 @@ function Main({ onSignedOut }: { onSignedOut: () => void }) {
           {v.name === 'add' && <AddFood nav={nav} />}
           {v.name === 'portion' && <Portion nav={nav} product={v.product} />}
           {v.name === 'settings' && <Settings nav={nav} profile={profile} onSignedOut={onSignedOut} />}
+          {v.name === 'progress' && <Progress nav={nav} profile={profile} />}
+          {v.name === 'coach' && <Coach nav={nav} profile={profile} />}
         </main>
       ))}
 
       {tabbed && (
         <nav className="pb-safe border-t border-line bg-bg/95 backdrop-blur">
-          <div className="relative grid grid-cols-3 items-center pt-2">
+          <div className="relative grid grid-cols-5 items-center pt-2">
             <TabBtn active={view.name === 'today'} onClick={() => setStack([{ name: 'today' }])} icon={Icon.home} label="Hoy" />
+            <TabBtn active={view.name === 'progress'} onClick={() => setStack([{ name: 'today' }, { name: 'progress' }])} icon={Icon.chart} label="Progreso" />
             <div className="flex justify-center">
               <button
                 onClick={() => { setMeal(null); nav.go({ name: 'scan', mode: 'plate' }) }}
@@ -150,6 +157,7 @@ function Main({ onSignedOut }: { onSignedOut: () => void }) {
                 {Icon.camera}
               </button>
             </div>
+            <TabBtn active={view.name === 'coach'} onClick={() => setStack([{ name: 'today' }, { name: 'coach' }])} icon={Icon.coach} label="Coach" />
             <TabBtn active={view.name === 'add'} onClick={() => setStack([{ name: 'today' }, { name: 'add' }])} icon={Icon.search} label="Buscar" />
           </div>
         </nav>

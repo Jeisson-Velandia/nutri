@@ -16,6 +16,7 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
   const [carbCycling, setCarbCycling] = useState(existing?.carbCycling ?? true)
   const [stepsTarget, setSteps] = useState(existing?.stepsTarget ?? GOALS[existing?.goal ?? 'cut'].steps)
   const [sleepTarget, setSleep] = useState(existing?.sleepTarget ?? 7.5)
+  const [targetWeight, setTargetWeight] = useState<number>(existing?.targetWeightKg ?? 0)
 
   const g = GOALS[goal]
   const age = new Date().getFullYear() - birthYear
@@ -34,7 +35,12 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
     await db.profile.put({
       id: 'me', sex, birthYear, heightCm, weightKg, activity, goal,
       ratePctWeek: g.rate ? rate : 0, trainingDays, carbCycling, stepsTarget, sleepTarget, targets,
+      targetWeightKg: targetWeight > 0 ? targetWeight : undefined,
     })
+    // El peso del perfil también queda en el historial de hoy (para Progreso).
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+    const h = await db.health.get(today)
+    if (h?.weightKg !== weightKg) await db.health.put({ ...(h ?? {}), date: today, weightKg, source: h?.source ?? 'manual' })
     onDone()
   }
 
@@ -110,6 +116,9 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
         </label>
       </Section>
 
+      {goal !== 'maintain' && goal !== 'recomp' && (
+        <NumField label="Peso objetivo (kg) — para la proyección" value={targetWeight} onChange={setTargetWeight} step={0.5} />
+      )}
       <div className="grid grid-cols-2 gap-3">
         <NumField label="Pasos diarios" value={stepsTarget} onChange={setSteps} step={500} />
         <NumField label="Sueño (horas)" value={sleepTarget} onChange={setSleep} step={0.5} />

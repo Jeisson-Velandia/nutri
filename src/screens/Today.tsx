@@ -150,7 +150,7 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
                       <button onClick={() => setEditing(e)} className="flex w-full items-center justify-between px-4 py-2.5 text-left active:bg-bg">
                         <div className="min-w-0">
                           <div className="truncate text-sm">{e.name}</div>
-                          <div className="text-xs text-muted tabular-nums">{Math.round(e.grams)} g · P {Math.round(e.protein_g)} · C {Math.round(e.carbs_g)} · G {Math.round(e.fat_g)}</div>
+                          <div className="text-xs text-muted tabular-nums">{e.portion ? `${(e.grams / 100).toLocaleString('es-CO')} porción` : `${Math.round(e.grams)} g`} · P {Math.round(e.protein_g)} · C {Math.round(e.carbs_g)} · G {Math.round(e.fat_g)}</div>
                         </div>
                         <div className="ml-3 shrink-0 text-sm tabular-nums">{Math.round(e.kcal)}</div>
                       </button>
@@ -187,10 +187,20 @@ function EditEntry({ entry, onClose }: { entry: Entry; onClose: () => void }) {
         <h3 className="text-lg font-semibold">{entry.name}</h3>
         <p className="text-sm text-muted tabular-nums">{scaled.kcal} kcal · P {scaled.protein_g} · C {scaled.carbs_g} · G {scaled.fat_g}</p>
         <div className="mt-4 flex items-center gap-3">
-          <button onClick={() => setGrams((g) => Math.max(1, g - 10))} className="chip">−10</button>
-          <input type="number" inputMode="decimal" value={grams} onChange={(e) => setGrams(+e.target.value)} className="field text-center tabular-nums" />
-          <span className="text-muted">g</span>
-          <button onClick={() => setGrams((g) => g + 10)} className="chip">+10</button>
+          {entry.portion ? (
+            <>
+              <button onClick={() => setGrams((g) => Math.max(25, g - 25))} className="chip">−¼</button>
+              <div className="field text-center tabular-nums">{(grams / 100).toLocaleString('es-CO')} porción</div>
+              <button onClick={() => setGrams((g) => g + 25)} className="chip">+¼</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setGrams((g) => Math.max(1, g - 10))} className="chip">−10</button>
+              <input type="number" inputMode="decimal" value={grams} onChange={(e) => setGrams(+e.target.value)} className="field text-center tabular-nums" />
+              <span className="text-muted">g</span>
+              <button onClick={() => setGrams((g) => g + 10)} className="chip">+10</button>
+            </>
+          )}
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {(Object.keys(MEAL_LABEL) as Meal[]).map((m) => (

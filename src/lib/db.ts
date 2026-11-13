@@ -28,6 +28,8 @@ export interface Profile extends SyncMeta {
   carbCycling: boolean
   stepsTarget: number
   sleepTarget: number
+  /** Peso al que quieres llegar (para la proyección). */
+  targetWeightKg?: number
   targets: Targets
 }
 
@@ -44,6 +46,9 @@ export interface Health extends SyncMeta {
   sleepTodaySec?: number
   source?: 'shortcut' | 'manual'
 }
+
+/** Registros del Coach: preferencias ('prefs'), plan generado ('plan') y sesiones hechas ('done:YYYY-MM-DD'). */
+export interface CoachRecord extends SyncMeta { id: string; [k: string]: unknown }
 
 export interface Workout { type: string; minutes?: number; kcal?: number; km?: number; start?: string }
 
@@ -85,6 +90,8 @@ export interface Entry extends SyncMeta {
   source: EntrySource
   foodId?: string
   scanId?: string
+  /** Opción del plan del Coach: se cuenta en porciones (grams/100) en vez de gramos. */
+  portion?: boolean
   createdAt: number
 }
 
@@ -106,7 +113,7 @@ export interface Setting extends SyncMeta { key: string; value: unknown }
 
 export interface Tombstone { key: string; tbl: string; id: string; at: number }
 
-export const SYNC_TABLES = ['profile', 'foods', 'entries', 'water', 'scans', 'settings', 'health', 'daily'] as const
+export const SYNC_TABLES = ['profile', 'foods', 'entries', 'water', 'scans', 'settings', 'health', 'daily', 'coach'] as const
 export type SyncTable = (typeof SYNC_TABLES)[number]
 
 class NutriDB extends Dexie {
@@ -119,6 +126,7 @@ class NutriDB extends Dexie {
   tombstones!: Table<Tombstone, string>
   health!: Table<Health, string>
   daily!: Table<Daily, string>
+  coach!: Table<CoachRecord, string>
 
   constructor() {
     // Base nueva con ids de texto (UUID) para poder sincronizar entre dispositivos.
@@ -139,6 +147,7 @@ class NutriDB extends Dexie {
       // Perfil anterior: objetivo lose/gain y ritmo en kg → nuevos modos y % por semana.
       await tx.table('profile').toCollection().modify((p: any) => { normalizeProfile(p) })
     })
+    this.version(3).stores({ coach: 'id, _dirty' })
   }
 }
 
