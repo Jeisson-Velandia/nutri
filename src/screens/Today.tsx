@@ -112,6 +112,13 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
           </ul>
         </div>
       )}
+      <div className="mx-5 mt-2 flex items-center justify-between text-[11px] text-muted">
+        <span>{health?.updatedAt ? `Salud: ${new Date(health.updatedAt).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' })}` : 'Sin datos de Salud hoy'}</span>
+        <button
+          onClick={() => { window.location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(localStorage.getItem('nutri-shortcut-name') || 'Nutrí')}` }}
+          className="chip px-2.5 py-1 text-[11px]"
+        >Actualizar desde Salud</button>
+      </div>
       {health?.sleepH != null && t.sleepH && health.sleepH < t.sleepH - 1 && (
         <p className="mx-5 mt-2 rounded-xl bg-carbs/10 px-3 py-2 text-xs text-carbs">Dormiste poco: es normal tener más hambre hoy. Prioriza proteína y verduras para llenarte sin pasarte.</p>
       )}
