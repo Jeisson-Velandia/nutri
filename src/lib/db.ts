@@ -28,6 +28,8 @@ export interface Profile extends SyncMeta {
   carbCycling: boolean
   stepsTarget: number
   sleepTarget: number
+  /** Sumar a la meta del día las calorías activas del reloj (en vez del factor de actividad fijo). */
+  useActiveKcal?: boolean
   /** Peso al que quieres llegar (para la proyección). */
   targetWeightKg?: number
   targets: Targets

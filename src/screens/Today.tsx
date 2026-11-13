@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { Nav } from '../App'
 import { db, MEAL_LABEL, shiftDate, todayISO, type Entry, type Health, type Meal, type Profile } from '../lib/db'
-import { targetsForDay } from '../lib/nutrition'
+import { dayTargets } from '../lib/nutrition'
 import { Icon, MacroBar, Ring } from '../ui'
 
 const MEALS: Meal[] = ['breakfast', 'lunch', 'dinner', 'snack']
@@ -30,7 +30,8 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
   // Si hubo entreno registrado en Salud, el día cuenta como de entreno (salvo que lo cambies a mano).
   const exercised = (health?.exerciseMin ?? 0) >= 20 || !!health?.runKm || !!health?.bikeKm || !!health?.swimM
   const training = daily?.training ?? (workouts.length > 0 || exercised || (profile.trainingDays ?? []).includes(weekday))
-  const t = { ...profile.targets, ...targetsForDay(profile.targets, training) }
+  const dt = dayTargets(profile.targets, training, { useActive: profile.useActiveKcal ?? true, activeKcal: health?.activeKcal })
+  const t = { ...profile.targets, kcal: dt.kcal, carbs_g: dt.carbs_g }
   const sum = entries.reduce(
     (a, e) => ({ kcal: a.kcal + e.kcal, p: a.p + e.protein_g, c: a.c + e.carbs_g, f: a.f + e.fat_g }),
     { kcal: 0, p: 0, c: 0, f: 0 },
@@ -65,6 +66,7 @@ export default function Today({ nav, profile }: { nav: Nav; profile: Profile }) 
           <div className={`text-4xl font-bold tabular-nums ${remaining < 0 ? 'text-fat' : ''}`}>{Math.abs(Math.round(remaining))}</div>
           <div className="text-xs text-muted">{remaining < 0 ? 'kcal de más' : 'kcal restantes'}</div>
           <div className="mt-1 text-[11px] text-muted tabular-nums">{Math.round(sum.kcal)} / {t.kcal}</div>
+          {dt.dynamic && dt.fromActivity > 0 && <div className="text-[10px] text-accent tabular-nums">+{dt.fromActivity} por actividad</div>}
         </Ring>
       </div>
 

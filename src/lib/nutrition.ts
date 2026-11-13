@@ -89,3 +89,24 @@ export function targetsForDay(t: Targets, training: boolean) {
   if (t.kcalTrain == null) return { kcal: t.kcal, carbs_g: t.carbs_g }
   return training ? { kcal: t.kcalTrain, carbs_g: t.carbsTrain! } : { kcal: t.kcalRest!, carbs_g: t.carbsRest! }
 }
+
+/**
+ * Meta del día ajustada con las calorías activas del reloj (si está activado en el plan):
+ *   meta = basal × 1,1 (digestión) + 85 % de las calorías activas + ajuste del objetivo,
+ *   nunca por debajo de la meta de un día tranquilo (basal × 1,2 + ajuste).
+ * Las calorías extra van a carbohidratos; proteína y grasa no cambian.
+ */
+export function dayTargets(
+  t: Targets,
+  training: boolean,
+  opts: { useActive: boolean; activeKcal?: number },
+): { kcal: number; carbs_g: number; base: number; fromActivity: number; dynamic: boolean } {
+  const fixed = targetsForDay(t, training)
+  if (!opts.useActive || opts.activeKcal == null) return { ...fixed, base: fixed.kcal, fromActivity: 0, dynamic: false }
+  const adj = t.kcal - t.tdee // déficit o superávit del objetivo
+  const calmDay = Math.round((t.bmr * 1.2 + adj) / 10) * 10
+  const withActivity = Math.round((t.bmr * 1.1 + opts.activeKcal * 0.85 + adj) / 10) * 10
+  const kcal = Math.max(calmDay, withActivity)
+  const carbs_g = Math.max(0, Math.round((kcal - t.protein_g * 4 - t.fat_g * 9) / 4))
+  return { kcal, carbs_g, base: calmDay, fromActivity: kcal - calmDay, dynamic: true }
+}

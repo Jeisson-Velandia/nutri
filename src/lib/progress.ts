@@ -1,5 +1,5 @@
 import { db, shiftDate, todayISO, type Profile } from './db'
-import { targetsForDay } from './nutrition'
+import { dayTargets } from './nutrition'
 
 export interface DayStat {
   date: string
@@ -67,7 +67,7 @@ export async function loadDays(profile: Profile, from: string): Promise<DayStat[
       carbs_g: es.reduce((a, e) => a + e.carbs_g, 0),
       fat_g: es.reduce((a, e) => a + e.fat_g, 0),
       logged: es.length > 0,
-      targetKcal: targetsForDay(profile.targets, training).kcal,
+      targetKcal: dayTargets(profile.targets, training, { useActive: profile.useActiveKcal ?? true, activeKcal: h?.activeKcal }).kcal,
       steps: h?.steps,
       sleepH: h?.sleepH,
       activeKcal: h?.activeKcal,

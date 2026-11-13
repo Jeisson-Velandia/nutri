@@ -14,6 +14,7 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
   const [rate, setRate] = useState(existing?.ratePctWeek ?? GOALS[existing?.goal ?? 'cut'].rate?.def ?? 0)
   const [trainingDays, setTrainingDays] = useState<number[]>(existing?.trainingDays ?? [1, 2, 3, 4, 5])
   const [carbCycling, setCarbCycling] = useState(existing?.carbCycling ?? true)
+  const [useActiveKcal, setUseActive] = useState(existing?.useActiveKcal ?? true)
   const [stepsTarget, setSteps] = useState(existing?.stepsTarget ?? GOALS[existing?.goal ?? 'cut'].steps)
   const [sleepTarget, setSleep] = useState(existing?.sleepTarget ?? 7.5)
   const [targetWeight, setTargetWeight] = useState<number>(existing?.targetWeightKg ?? 0)
@@ -36,6 +37,7 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
       id: 'me', sex, birthYear, heightCm, weightKg, activity, goal,
       ratePctWeek: g.rate ? rate : 0, trainingDays, carbCycling, stepsTarget, sleepTarget, targets,
       targetWeightKg: targetWeight > 0 ? targetWeight : undefined,
+      useActiveKcal,
     })
     // El peso del perfil también queda en el historial de hoy (para Progreso).
     const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)
@@ -113,6 +115,16 @@ export default function Onboarding({ existing, onDone }: { existing?: Profile; o
             <span className="block text-xs text-muted">Más carbos los días de entreno, menos en descanso; mismo total semanal.</span>
           </span>
           <input type="checkbox" checked={carbCycling} onChange={(e) => setCarbCycling(e.target.checked)} className="h-5 w-5 accent-[var(--color-accent)]" />
+        </label>
+      </Section>
+
+      <Section title="Calorías del Apple Watch">
+        <label className="flex items-center justify-between rounded-xl border border-line bg-card p-3">
+          <span>
+            <span className="block font-medium">Sumar lo que gastas cada día</span>
+            <span className="block text-xs text-muted">Tu meta sube con las calorías activas del reloj (cuenta el 85 %, porque el reloj suele sobreestimar). Sin datos del reloj se usa tu nivel de actividad.</span>
+          </span>
+          <input type="checkbox" checked={useActiveKcal} onChange={(e) => setUseActive(e.target.checked)} className="h-5 w-5 accent-[var(--color-accent)]" />
         </label>
       </Section>
 
