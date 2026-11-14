@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, migrateFromV1, todayISO, type Meal } from './lib/db'
+import { db, migrateFromV1, repairHealthValues, todayISO, type Meal } from './lib/db'
 import { syncEnabled } from './config'
 import { getSession, startAutoSync, syncNow } from './lib/sync'
 import Login from './screens/Login'
@@ -65,6 +65,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await migrateFromV1().catch(() => {})
+      await repairHealthValues().catch(() => {})
       if (!syncEnabled) return setBoot('ready')
       startAutoSync()
       const session = await getSession()

@@ -315,3 +315,9 @@ export async function importAll(data: any) {
     await db.settings.bulkPut((data.settings ?? []).map(({ _dirty, ...r }: any) => r))
   })
 }
+
+/** Repara calorías activas que se leyeron ×1000 por la coma decimal (p. ej. "189,104" → 189104). */
+export async function repairHealthValues() {
+  const bad = await db.health.filter((h) => (h.activeKcal ?? 0) > 6000).toArray()
+  for (const h of bad) await db.health.update(h.date, { activeKcal: Math.round(h.activeKcal! / 1000) })
+}

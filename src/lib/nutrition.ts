@@ -104,7 +104,7 @@ export function dayTargets(
   opts: { useActive: boolean; activeKcal?: number },
 ): { kcal: number; carbs_g: number; base: number; fromActivity: number; dynamic: boolean } {
   const fixed = targetsForDay(t, training)
-  if (!opts.useActive || opts.activeKcal == null) return { ...fixed, base: fixed.kcal, fromActivity: 0, dynamic: false }
+  if (!opts.useActive || opts.activeKcal == null || opts.activeKcal > 6000) return { ...fixed, base: fixed.kcal, fromActivity: 0, dynamic: false }
   const adj = t.kcal - t.tdee // déficit o superávit del objetivo
   const calmDay = Math.round((t.bmr * 1.2 + adj) / 10) * 10
   const withActivity = Math.round((t.bmr * 1.1 + opts.activeKcal * 0.85 + adj) / 10) * 10

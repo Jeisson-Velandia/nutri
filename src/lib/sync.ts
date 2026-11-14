@@ -159,18 +159,23 @@ async function pullHealthInbox(userId: string) {
       const data = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw
       const date = String(data.date ?? d.id).slice(0, 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { await deleteDoc(d.ref); continue }
-      const num = (v: unknown, decimals: number) => {
-        const n = typeof v === 'number' ? v : parseLocaleNumber(String(v ?? ''))
-        return isFinite(n) && n > 0 ? +n.toFixed(decimals) : undefined
+      // Atajos escribe los números sin separador de miles: una sola coma o punto es SIEMPRE decimal
+      // ("189,104" = 189,1 kcal). Además se descartan valores imposibles.
+      const LIMITS: Record<string, number> = { steps: 100000, activeKcal: 6000, exerciseMin: 900, weightKg: 300, sleepH: 16, runKm: 300, bikeKm: 600, swimM: 20000 }
+      const num = (v: unknown, decimals: number, field?: string) => {
+        const n = typeof v === 'number' ? v : parseShortcutNumber(String(v ?? ''))
+        if (!isFinite(n) || n <= 0) return undefined
+        if (field && LIMITS[field] && n > LIMITS[field]) return undefined
+        return +n.toFixed(decimals)
       }
       const incoming = {
-        steps: num(data.steps, 0),
+        steps: num(data.steps, 0, 'steps'),
         sleepH: data.sleep != null ? sleepFromSegments(String(data.sleep), date) : num(data.sleepH, 2),
-        activeKcal: num(data.activeKcal, 0),
-        weightKg: num(data.weightKg, 1),
-        exerciseMin: num(data.exerciseMin, 0),
-        runKm: num(data.runKm, 2),
-        bikeKm: num(data.bikeKm, 1),
+        activeKcal: num(data.activeKcal, 0, 'activeKcal'),
+        weightKg: num(data.weightKg, 1, 'weightKg'),
+        exerciseMin: num(data.exerciseMin, 0, 'exerciseMin'),
+        runKm: num(data.runKm, 2, 'runKm'),
+        bikeKm: num(data.bikeKm, 1, 'bikeKm'),
         // Natación: Salud la da en metros; si llega un número pequeño, venía en km.
         swimM: (() => { const v = num(data.swimM, 2); return v == null ? undefined : v < 20 ? Math.round(v * 1000) : Math.round(v) })(),
       }
@@ -270,6 +275,15 @@ function durationToMinutes(raw?: string): number | undefined {
   const n = parseLocaleNumber(t)
   if (!isFinite(n)) return undefined
   return n > 600 ? n / 60 : n // número suelto: segundos si es grande, si no minutos
+}
+
+/** Números que manda el Atajo: sin miles; si hay una sola coma o punto, es decimal. */
+export function parseShortcutNumber(raw: string): number {
+  const t = raw.replace(/[^\d.,-]/g, '')
+  if (!t) return NaN
+  const hasDot = t.includes('.'), hasComma = t.includes(',')
+  if (hasDot && hasComma) return parseLocaleNumber(t)
+  return parseFloat(t.replace(',', '.'))
 }
 
 /** Lee números escritos como "8123", "8.123", "8 123", "612,5", "1.612,45" o "1,612.45". */
