@@ -1,5 +1,5 @@
 /** Redimensiona una foto a máx. `max` px de lado y la devuelve como JPEG base64 (sin prefijo). */
-export async function resizeToBase64(file: File | Blob, max = 1024, quality = 0.82) {
+export async function resizeToBase64(file: File | Blob, max = 896, quality = 0.8) {
   const bitmap = await createImageBitmap(file)
   const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height))
   const w = Math.round(bitmap.width * scale)

@@ -157,11 +157,12 @@ function fastThinking(model: string) {
 
 const noThinkingSupport = new Set<string>()
 
-async function requestOnce(model: string, apiKey: string, system: string, parts: any[], timeoutMs = 60000) {
+async function requestOnce(model: string, apiKey: string, system: string, parts: any[], timeoutMs = 60000, outer?: AbortSignal) {
   const send = async (withThinking: boolean) => {
     const thinkingConfig = withThinking ? fastThinking(model) : undefined
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    outer?.addEventListener('abort', () => ctrl.abort(), { once: true })
     let r: Response
     try {
       r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -215,48 +216,82 @@ async function availableFlashModels(apiKey: string): Promise<string[]> {
 }
 
 /** Llama al modelo elegido; si está saturado, reintenta una vez y luego prueba con otros modelos Flash. */
+/**
+ * Llama a Gemini con "pedidos de respaldo": arranca con el modelo que mejor respondió; si en unos segundos
+ * no contesta, lanza otro modelo en paralelo y se queda con el primero que responda bien.
+ * Si uno falla por saturación, lanza el siguiente de inmediato. Máximo 2 a la vez.
+ */
 async function callGemini(system: string, parts: any[], hasImage = false, timeoutOverride?: number): Promise<{ json: any; model: string; latencyMs: number }> {
   const apiKey = await getSetting<string>('apiKey', '')
   if (!apiKey) throw new Error('Falta tu API key de Gemini. Agrégala en Ajustes.')
   const preferred = await getSetting<string>('model', DEFAULT_MODEL)
-  // Empieza por el último modelo que respondió bien; sin esperas entre intentos.
   const chain = [...new Set([lastGoodModel(), preferred, ...MODEL_OPTIONS.map((m) => m.id)].filter(Boolean) as string[])]
-  const timeoutMs = timeoutOverride ?? (hasImage ? 20000 : 12000)
+  const long = timeoutOverride != null && timeoutOverride > 30000 // planes del coach, resúmenes
+  const perAttempt = timeoutOverride ?? (hasImage ? 25000 : 15000)
+  const hedgeAfter = long ? 20000 : hasImage ? 6000 : 4000
+  const totalCap = long ? timeoutOverride! + 15000 : hasImage ? 40000 : 25000
   const t0 = performance.now()
+  const stopAll = new AbortController()
   let last = { status: 0, msg: '' }
   let extended = false
+  let next = 0
+  let launched = 0
+
   try {
-    for (let i = 0; i < chain.length && i < 6; i++) {
-      const model = chain[i]
-      emit({ model, attempt: i + 1, startedAt: t0 })
-      const res = await requestOnce(model, apiKey, system, parts, timeoutMs)
-      if (res.ok) {
-        const text: string = (res.body?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
-        const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
-        try {
-          const json = JSON.parse(clean)
-          rememberGood(model)
-          return { json, model, latencyMs: Math.round(performance.now() - t0) }
-        } catch {
-          throw new Error('La IA devolvió una respuesta que no se pudo leer. Intenta otra vez.')
+    return await new Promise((resolve, reject) => {
+      let inFlight = 0
+      let finished = false
+      let hedgeTimer: ReturnType<typeof setTimeout> | undefined
+      const capTimer = setTimeout(() => finish(null), totalCap)
+
+      function finish(ok: { json: any; model: string } | null) {
+        if (finished) return
+        finished = true
+        clearTimeout(capTimer); clearTimeout(hedgeTimer)
+        stopAll.abort()
+        if (ok) { rememberGood(ok.model); resolve({ ...ok, latencyMs: Math.round(performance.now() - t0) }); return }
+        if (last.status === 0 && last.msg === 'network') return reject(new Error('Sin conexión a internet.'))
+        if (last.status === 429) return reject(new Error('Llegaste al límite del plan gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo.'))
+        if (last.status === 400 && /API key/i.test(last.msg)) return reject(new Error('La API key no es válida. Revísala en Ajustes.'))
+        if (last.status && !isOverload(last.status, last.msg) && last.status !== 404) return reject(new Error(last.msg))
+        reject(new Error('Gemini está saturado o lento en este momento. Intenta de nuevo en un rato, o usa "Texto" o el buscador.'))
+      }
+
+      async function launch() {
+        if (finished || inFlight >= 2 || launched >= 7) return
+        if (next >= chain.length && !extended) {
+          extended = true
+          for (const m of await availableFlashModels(apiKey)) if (!chain.includes(m)) chain.push(m)
         }
+        if (next >= chain.length) { if (inFlight === 0) finish(null); return }
+        const model = chain[next++]
+        inFlight++; launched++
+        emit({ model, attempt: launched, startedAt: t0 })
+        // Si este no responde pronto, se lanza uno de respaldo en paralelo.
+        clearTimeout(hedgeTimer)
+        hedgeTimer = setTimeout(() => launch(), hedgeAfter)
+        const res = await requestOnce(model, apiKey, system, parts, perAttempt, stopAll.signal)
+        inFlight--
+        if (finished) return
+        if (res.ok) {
+          const text: string = (res.body?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
+          const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+          try { return finish({ json: JSON.parse(clean), model }) } catch { last = { status: 500, msg: 'json' } }
+        } else {
+          last = { status: res.status, msg: res.msg }
+          if (res.status === 0 && res.msg === 'network') return finish(null)
+          const retryable = isOverload(res.status, res.msg) || res.status === 429 || res.status === 404 || res.status === 500
+          if (!retryable && inFlight === 0) return finish(null)
+        }
+        launch() // falló este: siguiente de inmediato
+        if (inFlight === 0 && next >= chain.length && extended) finish(null)
       }
-      last = { status: res.status, msg: res.msg }
-      if (res.status === 0) throw new Error('Sin conexión a internet.')
-      const retryable = isOverload(res.status, res.msg) || res.status === 429 || res.status === 404
-      if (!retryable) break
-      if (i === chain.length - 1 && !extended) {
-        extended = true
-        for (const m of await availableFlashModels(apiKey)) if (!chain.includes(m)) chain.push(m)
-      }
-    }
+
+      launch()
+    })
   } finally {
     emit(null)
   }
-  if (last.status === 429) throw new Error('Llegaste al límite del plan gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo.')
-  if (isOverload(last.status, last.msg)) throw new Error('Los modelos de Gemini están saturados o lentos en este momento. Intenta de nuevo en unos minutos.')
-  if (last.status === 400 && /API key/i.test(last.msg)) throw new Error('La API key no es válida. Revísala en Ajustes.')
-  throw new Error(last.msg)
 }
 
 async function userContext() {

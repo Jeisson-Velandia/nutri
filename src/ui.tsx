@@ -120,7 +120,7 @@ export function AiSpinner({ label }: { label: string }) {
     <div className="flex flex-col items-center gap-2 py-8 text-muted">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-accent" />
       <p className="text-sm">{label}</p>
-      {p && <p className="text-xs tabular-nums">{secs} s · {p.model}{p.attempt > 1 ? ` (intento ${p.attempt}: el anterior estaba saturado)` : ''}</p>}
+      {p && <p className="text-xs tabular-nums">{secs} s · {p.model}{p.attempt > 1 ? ` (respaldo ${p.attempt - 1}: el primero estaba lento o saturado)` : ''}</p>}
     </div>
   )
 }
